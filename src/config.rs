@@ -61,12 +61,12 @@ impl Config {
         }
         
         let content = fs::read_to_string(path).context("Failed to read config.yml")?;
-        let config: Config = serde_yaml::from_str(&content).context("Failed to parse config.yml")?;
+        let config: Config = serde_norway::from_str(&content).context("Failed to parse config.yml")?;
         Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {
-        let content = serde_yaml::to_string(self)?;
+        let content = serde_norway::to_string(self)?;
         fs::write("config.yml", content).context("Failed to write config.yml")?;
         Ok(())
     }

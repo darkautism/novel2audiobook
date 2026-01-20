@@ -71,11 +71,14 @@ struct GeminiResponse {
 
 #[derive(Deserialize)]
 struct GeminiCandidate {
-    content: GeminiContentResponse,
+    content: Option<GeminiContentResponse>,
+    #[serde(rename = "finishReason")]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct GeminiContentResponse {
+    #[serde(default)]
     parts: Vec<GeminiPartResponse>,
 }
 
@@ -117,7 +120,12 @@ impl LlmClient for GeminiClient {
             return Err(anyhow!("Gemini API error: {}", error_text));
         }
 
-        let result: GeminiResponse = resp.json().await?;
+        // Get text to debug JSON issues if needed
+        let response_text = resp.text().await?;
+        let result: GeminiResponse = match serde_json::from_str(&response_text) {
+            Ok(r) => r,
+            Err(e) => return Err(anyhow!("Failed to parse Gemini response: {}. Body: {}", e, response_text)),
+        };
 
         if let Some(err) = result.error {
             return Err(anyhow!("Gemini API returned error: {}", err.message));
@@ -125,13 +133,19 @@ impl LlmClient for GeminiClient {
 
         if let Some(candidates) = result.candidates {
             if let Some(first) = candidates.first() {
-                if let Some(part) = first.content.parts.first() {
-                    return Ok(part.text.clone());
+                if let Some(content) = &first.content {
+                    if let Some(part) = content.parts.first() {
+                        return Ok(part.text.clone());
+                    }
                 }
+                
+                // If we get here, content or parts are missing
+                let reason = first.finish_reason.as_deref().unwrap_or("UNKNOWN");
+                return Err(anyhow!("Gemini response empty. Finish reason: {}", reason));
             }
         }
 
-        Err(anyhow!("Gemini response format unexpected or empty"))
+        Err(anyhow!("Gemini response format unexpected or empty. Body: {}", response_text))
     }
 }
 
@@ -202,5 +216,74 @@ impl LlmClient for OllamaClient {
 
         let result: OllamaResponse = resp.json().await?;
         Ok(result.message.content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gemini_response_parsing_safety_block() {
+        // Simulating a response where content is blocked (safety)
+        // Usually content is missing or parts missing.
+        let json = r#"{
+            "candidates": [
+                {
+                    "finishReason": "SAFETY",
+                    "index": 0
+                }
+            ]
+        }"#;
+
+        let result: GeminiResponse = serde_json::from_str(json).unwrap();
+        let candidate = &result.candidates.as_ref().unwrap()[0];
+        
+        assert!(candidate.content.is_none());
+        assert_eq!(candidate.finish_reason.as_deref(), Some("SAFETY"));
+    }
+
+    #[test]
+    fn test_gemini_response_parsing_empty_content() {
+        // Simulating a response where parts might be missing
+        let json = r#"{
+            "candidates": [
+                {
+                    "content": { "role": "model" },
+                    "finishReason": "STOP",
+                    "index": 0
+                }
+            ]
+        }"#;
+
+        let result: GeminiResponse = serde_json::from_str(json).unwrap();
+        let candidate = &result.candidates.as_ref().unwrap()[0];
+        
+        // Content exists but parts are empty (default)
+        assert!(candidate.content.is_some());
+        assert!(candidate.content.as_ref().unwrap().parts.is_empty());
+    }
+    
+    #[test]
+    fn test_gemini_response_parsing_success() {
+        let json = r#"{
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            { "text": "Hello world" }
+                        ],
+                        "role": "model"
+                    },
+                    "finishReason": "STOP",
+                    "index": 0
+                }
+            ]
+        }"#;
+        
+        let result: GeminiResponse = serde_json::from_str(json).unwrap();
+        let candidate = &result.candidates.as_ref().unwrap()[0];
+        
+        assert_eq!(candidate.content.as_ref().unwrap().parts[0].text, "Hello world");
     }
 }

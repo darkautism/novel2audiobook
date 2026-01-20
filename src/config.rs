@@ -22,9 +22,17 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmConfig {
-    pub provider: String, // "gemini" or "ollama"
+    pub provider: String, // "gemini", "ollama" or "openai"
     pub gemini: Option<GeminiConfig>,
     pub ollama: Option<OllamaConfig>,
+    pub openai: Option<OpenAIConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OpenAIConfig {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

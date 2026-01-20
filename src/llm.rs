@@ -18,6 +18,10 @@ pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
             let cfg = config.llm.ollama.as_ref().context("Ollama config missing")?;
             Ok(Box::new(OllamaClient::new(&cfg.base_url, &cfg.model)))
         },
+        "openai" => {
+            let cfg = config.llm.openai.as_ref().context("OpenAI config missing")?;
+            Ok(Box::new(OpenAIClient::new(&cfg.api_key, &cfg.model, cfg.base_url.as_deref())))
+        },
         _ => Err(anyhow!("Unknown LLM provider: {}", config.llm.provider))
     }
 }
@@ -219,6 +223,88 @@ impl LlmClient for OllamaClient {
     }
 }
 
+// --- OpenAI ---
+
+struct OpenAIClient {
+    api_key: String,
+    model: String,
+    base_url: String,
+    client: reqwest::Client,
+}
+
+impl OpenAIClient {
+    fn new(api_key: &str, model: &str, base_url: Option<&str>) -> Self {
+        Self {
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            base_url: base_url.unwrap_or("https://api.openai.com/v1").trim_end_matches('/').to_string(),
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
+}
+
+#[derive(Serialize)]
+struct OpenAIMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponse {
+    choices: Vec<OpenAIChoice>,
+}
+
+#[derive(Deserialize)]
+struct OpenAIChoice {
+    message: OpenAIMessageResponse,
+}
+
+#[derive(Deserialize)]
+struct OpenAIMessageResponse {
+    content: Option<String>,
+}
+
+#[async_trait]
+impl LlmClient for OpenAIClient {
+    async fn chat(&self, system: &str, user: &str) -> Result<String> {
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let request_body = OpenAIRequest {
+            model: self.model.clone(),
+            messages: vec![
+                OpenAIMessage { role: "system".to_string(), content: system.to_string() },
+                OpenAIMessage { role: "user".to_string(), content: user.to_string() },
+            ],
+        };
+
+        let resp = self.client.post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let error_text = resp.text().await?;
+            return Err(anyhow!("OpenAI API error: {}", error_text));
+        }
+
+        let result: OpenAIResponse = resp.json().await?;
+        if let Some(choice) = result.choices.first() {
+             if let Some(content) = &choice.message.content {
+                 return Ok(content.clone());
+             }
+        }
+        
+        Err(anyhow!("OpenAI response empty or missing content"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,5 +371,36 @@ mod tests {
         let candidate = &result.candidates.as_ref().unwrap()[0];
         
         assert_eq!(candidate.content.as_ref().unwrap().parts[0].text, "Hello world");
+    }
+
+    #[test]
+    fn test_openai_response_parsing_success() {
+        let json = r#"{
+            "id": "chatcmpl-123",
+            "object": "chat.completion",
+            "created": 1677652288,
+            "model": "gpt-3.5-turbo-0613",
+            "system_fingerprint": "fp_44709d6fcb",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello there, how may I assist you today?"
+                },
+                "logprobs": null,
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 12,
+                "total_tokens": 21
+            }
+        }"#;
+
+        let result: OpenAIResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            result.choices[0].message.content.as_deref(),
+            Some("Hello there, how may I assist you today?")
+        );
     }
 }

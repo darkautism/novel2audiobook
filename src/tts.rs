@@ -1,34 +1,18 @@
 use crate::config::Config;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use chrono::Utc;
-use futures::{SinkExt, StreamExt};
-use http::Request;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{self, protocol::Message},
-};
-use url::Url;
-use uuid::Uuid;
 
 // --- Constants based on Python Version ---
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const BASE_URL: &str = "speech.platform.bing.com/consumer/speech/synthesize/readaloud";
 
 // Chromium Versions
-const CHROMIUM_FULL_VERSION: &str = "143.0.3650.75";
 const CHROMIUM_MAJOR_VERSION: &str = "143"; // Split from full version
 
 // URLs
 const LIST_VOICES_URL: &str = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list";
-const WSS_BASE_URL: &str = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
-
-// Constant: The difference between Windows Epoch (1601) and Unix Epoch (1970) in seconds.
-const WIN_EPOCH_DIFF: i64 = 11_644_473_600;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "PascalCase")]
@@ -38,30 +22,6 @@ pub struct Voice {
     pub gender: String,
     pub locale: String,
     pub friendly_name: Option<String>,
-}
-
-/// Generates the Sec-MS-GEC authentication token.
-pub fn generate_sec_ms_gec() -> String {
-    let now = Utc::now();
-    let unix_seconds = now.timestamp();
-    let windows_seconds = unix_seconds + WIN_EPOCH_DIFF;
-    // Round down to the nearest 5-minute (300 seconds) window
-    let rounded_seconds = windows_seconds - (windows_seconds % 300);
-    
-    // Format as "ticks" (append 7 zeros)
-    let ticks_str = format!("{}0000000", rounded_seconds);
-    let input_string = format!("{}{}", ticks_str, TRUSTED_CLIENT_TOKEN);
-
-    let mut hasher = Sha256::new();
-    hasher.update(input_string);
-    let hash_result = hasher.finalize();
-
-    hex::encode(hash_result).to_uppercase()
-}
-
-/// Returns the GEC-Version header matching the Python logic: f"1-{CHROMIUM_FULL_VERSION}"
-pub fn get_sec_ms_gec_version() -> String {
-    format!("1-{}", CHROMIUM_FULL_VERSION)
 }
 
 /// Helper to generate the User-Agent string dynamically
@@ -88,8 +48,7 @@ pub trait TtsClient: Send + Sync {
 
 pub fn create_tts_client(config: &Config) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
-        "edge-tts-online" => Ok(Box::new(EdgeTtsOnlineClient)),
-        "edge-tts" => Ok(Box::new(EdgeTtsNativeClient)),
+        "edge-tts" | "edge-tts-online" => Ok(Box::new(EdgeTtsNativeClient)),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
@@ -123,124 +82,6 @@ async fn list_voices_http() -> Result<Vec<Voice>> {
     }
     let voices: Vec<Voice> = resp.json().await?;
     Ok(voices)
-}
-
-fn current_time_str() -> String {
-    let now = Utc::now();
-    format!(
-        "{}",
-        now.format("%a %b %d %Y %H:%M:%S GMT+0000 (Coordinated Universal Time)")
-    )
-}
-
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-// --- Edge TTS Online Client (WebSocket Implementation) ---
-
-pub struct EdgeTtsOnlineClient;
-
-#[async_trait]
-impl TtsClient for EdgeTtsOnlineClient {
-    async fn list_voices(&self) -> Result<Vec<Voice>> {
-        list_voices_http().await
-    }
-
-    async fn synthesize(&self, ssml: &str) -> Result<Vec<u8>> {
-        let connection_id = Uuid::new_v4().simple().to_string();
-        let url_string = format!(
-            "{}?TrustedClientToken={}&ConnectionId={}",
-            WSS_BASE_URL, TRUSTED_CLIENT_TOKEN, connection_id
-        );
-        let url = Url::parse(&url_string)?;
-
-        // 3. Generate Auth Tokens
-        let gec_token = generate_sec_ms_gec();
-        let gec_version = get_sec_ms_gec_version();
-
-        // 4. Build the HTTP Request for the Handshake
-        let request = Request::builder()
-            .method("GET")
-            .uri(url.as_str())
-            .header("Host", "speech.platform.bing.com")
-            .header("Connection", "Upgrade")
-            .header("Upgrade", "websocket")
-            .header("Pragma", "no-cache")
-            .header("Cache-Control", "no-cache")
-            .header("User-Agent", get_user_agent())
-            .header("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-            .header("Sec-WebSocket-Version", "13")
-            .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
-            .header("Accept-Encoding", "gzip, deflate, br, zstd")
-            .header("Accept-Language", "en-US,en;q=0.9")
-            // Auth Headers
-            .header("Sec-MS-GEC", gec_token)
-            .header("Sec-MS-GEC-Version", gec_version)
-            .body(())?;
-
-        // 5. Execute the Handshake
-        let (mut ws_stream, response) = connect_async(request).await
-            .map_err(|e| anyhow!("WebSocket connection failed: {}", e))?;
-
-        if !response.status().is_informational() {
-             println!("Handshake response status: {}", response.status());
-        }
-
-        let (mut write, mut read) = ws_stream.split();
-
-        let config_msg = format!(
-            "X-Timestamp:{}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{{\"context\":{{\"synthesis\":{{\"audio\":{{\"metadataoptions\":{{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"}},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}}}}}",
-            current_time_str()
-        );
-        write.send(Message::Text(config_msg.into())).await?;
-
-        let request_id = Uuid::new_v4().to_string().replace("-", "");
-        let ssml_msg = format!(
-            "X-RequestId:{}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:{}\r\nPath:ssml\r\n\r\n{}",
-            request_id,
-            current_time_str(),
-            ssml
-        );
-        write.send(Message::Text(ssml_msg.into())).await?;
-
-        let mut audio_data = Vec::new();
-        let mut turn_end = false;
-
-        while let Some(msg) = read.next().await {
-            let msg = msg?;
-            match msg {
-                Message::Binary(data) => {
-                    if let Some(pos) = find_subsequence(&data, b"Path:audio\r\n") {
-                        if let Some(header_end) = find_subsequence(&data[pos..], b"\r\n\r\n") {
-                            let payload_start = pos + header_end + 4;
-                            if payload_start < data.len() {
-                                audio_data.extend_from_slice(&data[payload_start..]);
-                            }
-                        }
-                    } else if find_subsequence(&data, b"Path:turn.end").is_some() {
-                        turn_end = true;
-                        break;
-                    }
-                }
-                Message::Text(text) => {
-                    if text.contains("Path:turn.end") {
-                        turn_end = true;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if !turn_end {
-             // Handle incomplete stream if necessary
-        }
-
-        Ok(audio_data)
-    }
 }
 
 // --- Edge TTS Native Client (Using Crate) ---

@@ -126,18 +126,15 @@ impl WorkflowManager {
             // 1. Analyze Characters
             println!("Analyzing characters...");
             let analysis_prompt = format!(
-                "Analyze the following text. Identify all speaking characters. \
-                Determine their gender (Male/Female) and if they are a main character (important). \
-                Return ONLY a JSON object: \
+                "請分析以下文本。識別所有說話的角色。\
+                確定他們的性別（Male/Female）以及是否為主要角色（important）。\
+                僅返回一個 JSON 對象：\
                 {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\" }} ] }} \
-                \n\nText:\n{}", 
+                \n\n文本：\n{}", 
                 text.chars().take(10000).collect::<String>() // Limit context if needed, but ideally full chapter.
             );
-            // Truncate text for analysis if too long? 
-            // With Gemini 1.5 Flash we have 1M context, so sending full text is fine usually.
-            // Assuming reasonably sized chapters.
 
-            let mut analysis_json = self.llm.chat("You are a literary assistant. Return valid JSON only.", &analysis_prompt).await?;
+            let mut analysis_json = self.llm.chat("你是一位文學助手。請僅返回有效的 JSON。", &analysis_prompt).await?;
 
             analysis_json = analysis_json.replace("\n", ""); // Clean newlines
             
@@ -165,25 +162,6 @@ impl WorkflowManager {
             let mut updated_map = false;
             for char in analysis.characters {
                 if !self.character_map.characters.contains_key(&char.name) {
-                    // If important, maybe we should assign a specific voice ID?
-                    // For now, the prompt says "Unimportant roles can be unbound, just gender".
-                    // "Important characters bind audio ID".
-                    // But where do we get the ID? We only have a list of *available* voices.
-                    // Should we auto-assign from the list?
-                    // Or does the user *manually* bind?
-                    // "2. Record character list... merge with previous... 9. Return to narrator section... extract list and let user choose?"
-                    // Wait, item 9: "Back to narrator section... let user choose... write to config" -> that was initialization.
-                    // Item 2: "Map names to gender/audio ID. Unimportant -> just gender".
-                    // This implies *auto-assignment* or just persistent tracking.
-                    // I'll leave `voice_id` None for now unless we implement an auto-assigner.
-                    // Actually, if `voice_id` is None, the generation step will pick a default Male/Female voice.
-                    // If we want consistent voices for main characters, we should probably pick one from the available list and save it.
-                    // For simplicity/MVP: I will just store gender. The `voice_id` will be None.
-                    // During generation, if `voice_id` is None, use `default_male` or `default_female`.
-                    
-                    // OPTIONAL: Auto-assign random consistent voice for "Important" characters from unused voices?
-                    // Let's stick to defaults for now to be safe, unless user requirement "3. Audio dictionary... merged" implies complex management.
-                    
                     self.character_map.characters.insert(char.name.clone(), CharacterInfo {
                         gender: char.gender,
                         voice_id: None, 
@@ -200,31 +178,31 @@ impl WorkflowManager {
             println!("Generating SSML...");
             let characters_json = serde_json::to_string(&self.character_map.characters)?;
             let ssml_prompt = format!(
-                "Convert the following novel text into SSML for Edge TTS. \
-                Use the provided Character Map for voice assignment. \
-                For characters with 'voice_id', use that voice. \
-                For others, use Gender to pick a generic tone (but you don't pick the voice name here, just mark the role/gender if needed, OR just output text segments). \
+                "請將以下小說文本轉換為 Edge TTS 的 SSML。\
+                使用提供的角色映射進行語音分配。\
+                對於有 'voice_id' 的角色，請使用該語音。\
+                對於其他人，請使用性別來選擇通用語調（但在此處不選擇語音名稱，僅在需要時標記角色/性別，或者僅輸出文本片段）。\
                 \n\n\
-                Actually, to make it easier: \
-                Output a JSON LIST of strings. Each string is a valid SSML <speak> block. \
-                Break the text into logical segments (paragraphs or dialogues). \
-                Use the <voice name='...'> tag. \
+                實際上，為了簡單起見：\
+                輸出一個字符串的 JSON 列表。每個字符串都是一個有效的 SSML <speak> 塊。\
+                將文本分解為邏輯段落（段落或對話）。\
+                使用 <voice name='...'> 標籤。\
                 \n\
-                Configuration: \
-                Default Male Voice: '{}' \
-                Default Female Voice: '{}' \
-                Narrator Voice: '{}' \
+                配置：\
+                默認男性語音：'{}'\n\
+                默認女性語音：'{}'\n\
+                旁白語音：'{}'\n\
                 \n\
-                Character Map: {} \
+                角色映射：{}\n\
                 \n\
-                Rules: \
-                1. Use <voice name='...'> for every segment. \
-                2. For narration, use Narrator Voice. \
-                3. For dialogue, check the speaker. If in Character Map and has voice_id, use it. \
-                   If no voice_id, use Default Male/Female based on gender. \
-                4. Adjust <prosody> for emotion if context suggests. \
-                5. Return ONLY JSON: [ \"<speak>...</speak>\", ... ] \
-                \n\nText:\n{}",
+                規則：\
+                1. 每個段落都使用 <voice name='...'>。\n\
+                2. 對於旁白，使用旁白語音。\n\
+                3. 對於對話，檢查說話者。如果在角色映射中且有 voice_id，則使用它。\n\
+                   如果沒有 voice_id，根據性別使用默認男性/女性語音。\n\
+                4. 如果上下文建議，調整 <prosody> 以表達情感。\n\
+                5. 僅返回 JSON：[ \"<speak>...</speak>\", ... ] \
+                \n\n文本：\n{}",
                 self.config.audio.default_male_voice.as_deref().unwrap_or(""),
                 self.config.audio.default_female_voice.as_deref().unwrap_or(""),
                 self.config.audio.narrator_voice.as_deref().unwrap_or(""),
@@ -232,7 +210,7 @@ impl WorkflowManager {
                 text
             );
 
-            let ssml_json = self.llm.chat("You are an SSML generator. Return valid JSON only.", &ssml_prompt).await?;
+            let ssml_json = self.llm.chat("你是一個 SSML 生成器。請僅返回有效的 JSON。", &ssml_prompt).await?;
             let clean_ssml_json = strip_code_blocks(&ssml_json);
             
             let ssml_segments: Vec<String> = serde_json::from_str(&clean_ssml_json)
@@ -328,9 +306,9 @@ mod tests {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
             
-            if user.contains("Analyze the following text") {
+            if user.contains("請分析以下文本") {
                 return Ok(r#"{"characters": [{"name": "Hero", "gender": "Male"}]}"#.to_string());
-            } else if user.contains("Convert the following novel text into SSML") {
+            } else if user.contains("請將以下小說文本轉換為 Edge TTS 的 SSML") {
                 return Ok(r#"["<speak>Test audio</speak>"]"#.to_string());
             }
             
@@ -377,6 +355,7 @@ mod tests {
                 provider: "mock".to_string(),
                 gemini: None,
                 ollama: None,
+                openai: None,
             },
             audio: crate::config::AudioConfig::default(),
         };
@@ -436,6 +415,7 @@ mod tests {
                 provider: "mock".to_string(),
                 gemini: None,
                 ollama: None,
+                openai: None,
             },
             audio: crate::config::AudioConfig::default(),
         };

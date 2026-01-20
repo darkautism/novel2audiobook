@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: ai-novel-translation
+            asset_name: ai-novel-translation-linux
+          - os: windows-latest
+            artifact_name: ai-novel-translation.exe
+            asset_name: ai-novel-translation-windows
+          - os: macos-latest
+            artifact_name: ai-novel-translation
+            asset_name: ai-novel-translation-macos
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Build release
+      run: cargo build --release --verbose
+
+    - name: Prepare distribution
+      shell: bash
+      run: |
+        mkdir -p dist
+        cp target/release/${{ matrix.artifact_name }} dist/
+        cp config.yml dist/
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.asset_name }}
+        path: dist/

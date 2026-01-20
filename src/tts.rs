@@ -48,7 +48,7 @@ pub trait TtsClient: Send + Sync {
 
 pub fn create_tts_client(config: &Config) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
-        "edge-tts" | "edge-tts-online" => Ok(Box::new(EdgeTtsNativeClient)),
+        "edge-tts" => Ok(Box::new(EdgeTtsClient)),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
@@ -86,10 +86,10 @@ async fn list_voices_http() -> Result<Vec<Voice>> {
 
 // --- Edge TTS Native Client (Using Crate) ---
 
-pub struct EdgeTtsNativeClient;
+pub struct EdgeTtsClient;
 
 #[async_trait]
-impl TtsClient for EdgeTtsNativeClient {
+impl TtsClient for EdgeTtsClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
         list_voices_http().await
     }

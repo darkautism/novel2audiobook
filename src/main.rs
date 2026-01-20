@@ -33,8 +33,11 @@ async fn main() -> Result<()> {
     // 3. Initialize LLM
     let llm = llm::create_llm(&config)?;
 
-    // 4. Initialize and Run Workflow
-    let mut manager = WorkflowManager::new(config.clone(), llm)?;
+    // 4. Initialize TTS
+    let tts = tts::create_tts_client(&config)?;
+
+    // 5. Initialize and Run Workflow
+    let mut manager = WorkflowManager::new(config.clone(), llm, tts)?;
     manager.run().await?;
 
     Ok(())

@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::tts::EdgeTtsClient;
+use crate::tts::TtsClient;
 use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,10 +30,11 @@ pub struct WorkflowManager {
     llm: Box<dyn LlmClient>,
     state: WorkflowState,
     character_map: CharacterMap,
+    tts: Box<dyn TtsClient>,
 }
 
 impl WorkflowManager {
-    pub fn new(config: Config, llm: Box<dyn LlmClient>) -> Result<Self> {
+    pub fn new(config: Config, llm: Box<dyn LlmClient>, tts: Box<dyn TtsClient>) -> Result<Self> {
         let state = Self::load_state(&config.build_folder)?;
         let character_map = Self::load_character_map(&config.build_folder)?;
         
@@ -42,6 +43,7 @@ impl WorkflowManager {
             llm,
             state,
             character_map,
+            tts,
         })
     }
 
@@ -257,7 +259,7 @@ impl WorkflowManager {
 
             println!("Synthesizing chunk {}/{}", i + 1, ssml_segments.len());
             // Retry logic?
-            let audio_data = EdgeTtsClient::synthesize(ssml).await?;
+            let audio_data = self.tts.synthesize(ssml).await?;
             fs::write(&chunk_path, audio_data)?;
             audio_files.push(chunk_path);
         }
@@ -336,6 +338,24 @@ mod tests {
         }
     }
 
+    struct MockTtsClient {
+        should_fail: bool,
+    }
+
+    #[async_trait]
+    impl TtsClient for MockTtsClient {
+        async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+            Ok(vec![])
+        }
+        async fn synthesize(&self, _ssml: &str) -> Result<Vec<u8>> {
+            if self.should_fail {
+                Err(anyhow::anyhow!("Mock TTS error"))
+            } else {
+                Ok(vec![0u8; 10])
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_cache_miss_generates_ssml_file() -> Result<()> {
         let test_root = Path::new("test_output_miss");
@@ -367,16 +387,18 @@ mod tests {
 
         let mock_llm = Box::new(MockLlmClient::new());
         let call_count = mock_llm.call_count.clone();
+        
+        let mock_tts = Box::new(MockTtsClient { should_fail: true });
 
-        let mut workflow = WorkflowManager::new(config.clone(), mock_llm)?;
+        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
         // Run process_chapter
         // We expect it to fail at synthesis step due to network, but generate SSML before that.
         let result = workflow.process_chapter(&chapter_path, filename).await;
         
         // Assertions
-        // Expect error due to synthesis network fail, but SSML should be generated.
-        assert!(result.is_err(), "Expected synthesis failure due to no network");
+        // Expect error due to synthesis network fail (mock configured to fail)
+        assert!(result.is_err(), "Expected synthesis failure due to mock error");
         
         // Check LLM calls
         assert_eq!(*call_count.lock().unwrap(), 2, "Should call LLM twice (Analysis + SSML)");
@@ -435,8 +457,10 @@ mod tests {
 
         let mock_llm = Box::new(MockLlmClient::new());
         let call_count = mock_llm.call_count.clone();
+        
+        let mock_tts = Box::new(MockTtsClient { should_fail: false });
 
-        let mut workflow = WorkflowManager::new(config.clone(), mock_llm)?;
+        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
         // Run process_chapter
         let result = workflow.process_chapter(&chapter_path, filename).await;

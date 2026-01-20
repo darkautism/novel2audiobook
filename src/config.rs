@@ -41,6 +41,8 @@ pub struct OllamaConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AudioConfig {
+    #[serde(default = "default_tts_provider")]
+    pub provider: String,
     #[serde(default = "default_language")]
     pub language: String,
     pub narrator_voice: Option<String>,
@@ -52,6 +54,7 @@ fn default_input() -> String { "input".to_string() }
 fn default_output() -> String { "output".to_string() }
 fn default_build() -> String { "build".to_string() }
 fn default_language() -> String { "zh".to_string() }
+fn default_tts_provider() -> String { "edge-tts".to_string() }
 
 impl Config {
     pub fn load() -> Result<Self> {

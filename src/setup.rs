@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::tts::{EdgeTtsClient, Voice};
+use crate::tts::{create_tts_client, Voice};
 use anyhow::{Result, anyhow};
 use inquire::Select;
 
@@ -13,7 +13,8 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
     {
         println!("Voice settings missing. Fetching available voices for language: {}...", config.audio.language);
         
-        let voices = EdgeTtsClient::list_voices().await?;
+        let tts = create_tts_client(config)?;
+        let voices = tts.list_voices().await?;
         let filtered_voices: Vec<Voice> = voices.into_iter()
             .filter(|v| v.locale.starts_with(&config.audio.language))
             .collect();

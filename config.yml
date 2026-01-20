@@ -1,0 +1,16 @@
+input_folder: ./input_chapters
+output_folder: ./output_audio
+build_folder: ./build
+llm:
+  provider: gemini
+  gemini:
+    api_key: YourAPIKEY
+    model: gemini-3-flash-preview
+  ollama:
+    base_url: http://localhost:11434
+    model: llama3:latest
+audio:
+  language: zh
+  narrator_voice: zh-TW-HsiaoChenNeural
+  default_male_voice: zh-TW-YunJheNeural
+  default_female_voice: zh-TW-HsiaoYuNeural

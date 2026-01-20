@@ -5,7 +5,8 @@ use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use tokio::fs as tokio_fs;
+use std::path::Path;
 use std::io::Write;
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
@@ -84,11 +85,14 @@ impl WorkflowManager {
     pub async fn run(&mut self) -> Result<()> {
         // List input files
         let input_path = Path::new(&self.config.input_folder);
-        let mut entries: Vec<PathBuf> = fs::read_dir(input_path)?
-            .filter_map(|res| res.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().map_or(false, |ext| ext == "txt"))
-            .collect();
+        let mut entries = Vec::new();
+        let mut dir = tokio_fs::read_dir(input_path).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "txt") {
+                entries.push(path);
+            }
+        }
         
         entries.sort();
 
@@ -103,7 +107,7 @@ impl WorkflowManager {
             println!("Processing chapter: {}", filename);
             self.process_chapter(&path, &filename).await?;
             
-            self.state.completed_chapters.push(filename.clone());
+            self.state.completed_chapters.push(filename);
             self.save_state()?;
         }
 

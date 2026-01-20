@@ -18,14 +18,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: ai-novel-translation
-            asset_name: ai-novel-translation-linux
+            artifact_name: novel2audiobook
+            asset_name: novel2audiobook-linux
           - os: windows-latest
-            artifact_name: ai-novel-translation.exe
-            asset_name: ai-novel-translation-windows
+            artifact_name: novel2audiobook.exe
+            asset_name: novel2audiobook-windows
           - os: macos-latest
-            artifact_name: ai-novel-translation
-            asset_name: ai-novel-translation-macos
+            artifact_name: novel2audiobook
+            asset_name: novel2audiobook-macos
 
     steps:
     - uses: actions/checkout@v4

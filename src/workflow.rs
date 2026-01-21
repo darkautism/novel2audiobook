@@ -308,7 +308,17 @@ impl WorkflowManager {
             // 2. Script Generation
             println!("Generating Script...");
             
-            let prompt = self.script_generator.generate_prompt(&text, &self.character_map)?;
+            // Gather voice styles
+            let mut voice_styles = HashMap::new();
+            for info in self.character_map.characters.values() {
+                if let Some(vid) = &info.voice_id {
+                    if let Ok(styles) = self.tts.get_voice_styles(vid).await {
+                        voice_styles.insert(vid.clone(), styles);
+                    }
+                }
+            }
+
+            let prompt = self.script_generator.generate_prompt(&text, &self.character_map, &voice_styles)?;
             let system_instruction = self.script_generator.get_system_prompt();
             
             let script_json = self.llm.chat(&system_instruction, &prompt).await?;

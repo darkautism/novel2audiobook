@@ -3,6 +3,7 @@ use crate::state::CharacterMap;
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioSegment {
@@ -14,7 +15,7 @@ pub struct AudioSegment {
 
 pub trait ScriptGenerator: Send + Sync {
     fn get_system_prompt(&self) -> String;
-    fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String>;
+    fn generate_prompt(&self, text: &str, char_map: &CharacterMap, voice_styles: &HashMap<String, Vec<String>>) -> Result<String>;
     fn parse_response(&self, response: &str) -> Result<Vec<AudioSegment>>;
     fn support_style(&self) -> Vec<String>;
 }
@@ -32,9 +33,29 @@ impl ScriptGenerator for JsonScriptGenerator {
         "你是一個有聲書腳本生成器。請將小說文本轉換為結構化的音頻腳本 JSON。".to_string()
     }
 
-    fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String> {
+    fn generate_prompt(&self, text: &str, char_map: &CharacterMap, voice_styles: &HashMap<String, Vec<String>>) -> Result<String> {
         let characters_json = serde_json::to_string(&char_map.characters)?;
-        let supported_styles = self.support_style();
+        let global_styles = self.support_style();
+        
+        // Build style info string
+        let mut specific_styles_str = String::new();
+        for (name, info) in &char_map.characters {
+            if let Some(vid) = &info.voice_id {
+                if let Some(styles) = voice_styles.get(vid) {
+                    if !styles.is_empty() {
+                         use std::fmt::Write;
+                         let _ = write!(specific_styles_str, "- {} ({}): [{}]\n", name, vid, styles.join(", "));
+                    }
+                }
+            }
+        }
+        
+        let style_instruction = if !specific_styles_str.is_empty() {
+            format!("通用情緒：[{}]\n特別指定角色情緒（請優先使用）：\n{}", global_styles.join(", "), specific_styles_str)
+        } else {
+            format!("支援的情緒：{}", global_styles.join(", "))
+        };
+
         let prompt = format!(
             "請將以下小說文本分解為對話和旁白段落。\
             根據提供的角色映射識別說話者。\
@@ -47,16 +68,17 @@ impl ScriptGenerator for JsonScriptGenerator {
               ...\n\
             ]\n\
             \n\
-            支援的情緒：{}\n\
+            {}\n\
             規則：\n\
             1. 每個段落都必須是一個對象。\n\
             2. 如果是旁白，speaker 填寫 '旁白'。旁白應要根據前後文有語氣抑揚頓挫，避免死念書。\n\
             3. 如果是對話，speaker 填寫角色名稱。\n\
             4. 保持文本完整，不要遺漏。\n\
             5. 對於不重要的路人角色，請根據性別使用 '路人(男)', '路人(女)' 或 '路人' 作為 speaker。\n\
+            6. 若角色有特別指定情緒，請優先從該列表中選擇最合適的情緒。若無，可留空或使用通用情緒。\n\
             \n\n文本：\n{}",
             characters_json,
-            supported_styles.join(", "),
+            style_instruction,
             text
         );
         Ok(prompt)
@@ -87,7 +109,7 @@ impl ScriptGenerator for PlainScriptGenerator {
         "You are a story narrator.".to_string()
     }
 
-    fn generate_prompt(&self, _text: &str, _char_map: &CharacterMap) -> Result<String> {
+    fn generate_prompt(&self, _text: &str, _char_map: &CharacterMap, _styles: &HashMap<String, Vec<String>>) -> Result<String> {
         Ok("TODO: Implement prompt".to_string())
     }
 

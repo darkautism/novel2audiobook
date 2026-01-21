@@ -2,9 +2,11 @@ use async_trait::async_trait;
 use anyhow::{Result, anyhow, Context};
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
+use std::fmt::Debug;
+
 
 #[async_trait]
-pub trait LlmClient: Send + Sync {
+pub trait LlmClient: Send + Sync + Debug {
     async fn chat(&self, system: &str, user: &str) -> Result<String>;
 }
 
@@ -27,7 +29,7 @@ pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
 }
 
 // --- Gemini ---
-
+#[derive(Debug)]
 struct GeminiClient {
     api_key: String,
     model: String,
@@ -154,7 +156,7 @@ impl LlmClient for GeminiClient {
 }
 
 // --- Ollama ---
-
+#[derive(Debug)]
 struct OllamaClient {
     base_url: String,
     model: String,
@@ -225,6 +227,7 @@ impl LlmClient for OllamaClient {
 
 // --- OpenAI ---
 
+#[derive(Debug)]
 struct OpenAIClient {
     api_key: String,
     model: String,

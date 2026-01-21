@@ -23,7 +23,6 @@ audio:
     narrator_voice: zh-CN-XiaoxiaoNeural
     default_male_voice: zh-TW-YunJheNeural
     default_female_voice: zh-TW-HsiaoYuNeural
-    # edge-tts disable all of style. If you want to enable it, you should using azure tts, it is paid version.
     style: false
   sovits-offline:
     base_url: http://127.0.0.1:9880
@@ -31,3 +30,16 @@ audio:
     narrator_voice: null
     default_male_voice: null
     default_female_voice: null
+  acgnai:
+    token: YourAPIKEY
+    concurrency: 5
+    model_list_url: https://gsv2p.acgnai.top/models/v4
+    infer_url: https://gsv2p.acgnai.top/infer_single
+    top_k: 10
+    top_p: 1.0
+    temperature: 1.0
+    speed_factor: 1.0
+    repetition_penalty: 1.35
+    narrator_voice: 星穹铁道-中文-阿兰_ZH
+    default_male_voice: 星穹铁道-中文-符玄_ZH
+    default_female_voice: 蔚蓝档案-中文-莲华

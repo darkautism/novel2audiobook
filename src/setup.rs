@@ -9,7 +9,7 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
 
     // Initialize factory (async)
     // For SoVITS, this loads the voice library.
-    let tts = create_tts_client(config).await?;
+    let tts = create_tts_client(config, None).await?;
 
     match provider.as_str() {
         "edge-tts" => {
@@ -99,6 +99,55 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
                      needs_save = true;
                  }
              }
+        },
+        "acgnai" => {
+            if config.audio.acgnai.is_none() {
+                config.audio.acgnai = Some(crate::config::AcgnaiConfig {
+                    token: "".to_string(),
+                    concurrency: 5,
+                    model_list_url: "https://gsv2p.acgnai.top/models/v4".to_string(),
+                    infer_url: "https://gsv2p.acgnai.top/infer_single".to_string(),
+                    top_k: 10,
+                    top_p: 1.0,
+                    temperature: 1.0,
+                    speed_factor: 1.0,
+                    repetition_penalty: 1.35,
+                    narrator_voice: None,
+                    default_male_voice: None,
+                    default_female_voice: None,
+                });
+            }
+
+            let setup_needed = {
+                let cfg = config.audio.acgnai.as_ref().unwrap();
+                cfg.narrator_voice.is_none() 
+                || cfg.default_male_voice.is_none() 
+                || cfg.default_female_voice.is_none()
+            };
+
+            if setup_needed {
+                println!("Fetching Acgnai models...");
+                let voices = tts.list_voices().await?;
+                
+                if voices.is_empty() {
+                    return Err(anyhow!("No Acgnai models found. Please check internet connection or config."));
+                }
+
+                let cfg = config.audio.acgnai.as_mut().unwrap();
+
+                if cfg.narrator_voice.is_none() {
+                    cfg.narrator_voice = Some(select_voice("Select Narrator Voice:", &voices, |_| true)?);
+                    needs_save = true;
+                }
+                if cfg.default_male_voice.is_none() {
+                    cfg.default_male_voice = Some(select_voice("Select Default Male Voice:", &voices, |v| v.gender.eq_ignore_ascii_case("Male"))?);
+                    needs_save = true;
+                }
+                if cfg.default_female_voice.is_none() {
+                    cfg.default_female_voice = Some(select_voice("Select Default Female Voice:", &voices, |v| v.gender.eq_ignore_ascii_case("Female"))?);
+                    needs_save = true;
+                }
+            }
         },
         _ => {
             println!("Setup not implemented for provider: {}", provider);

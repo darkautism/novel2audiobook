@@ -65,6 +65,8 @@ pub struct AudioConfig {
     
     #[serde(rename = "sovits-offline")]
     pub sovits: Option<SovitsConfig>,
+    
+    pub acgnai: Option<AcgnaiConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -88,6 +90,35 @@ pub struct SovitsConfig {
     pub default_female_voice: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AcgnaiConfig {
+    pub token: String,
+    
+    #[serde(default = "default_acgnai_concurrency")]
+    pub concurrency: usize,
+    
+    #[serde(default = "default_acgnai_model_list_url")]
+    pub model_list_url: String,
+    
+    #[serde(default = "default_acgnai_infer_url")]
+    pub infer_url: String,
+
+    #[serde(default = "default_acgnai_top_k")]
+    pub top_k: i32,
+    #[serde(default = "default_acgnai_top_p")]
+    pub top_p: f64,
+    #[serde(default = "default_acgnai_temperature")]
+    pub temperature: f64,
+    #[serde(default = "default_acgnai_speed_factor")]
+    pub speed_factor: f64,
+    #[serde(default = "default_acgnai_repetition_penalty")]
+    pub repetition_penalty: f64,
+
+    pub narrator_voice: Option<String>,
+    pub default_male_voice: Option<String>,
+    pub default_female_voice: Option<String>,
+}
+
 fn default_input() -> String { "input".to_string() }
 fn default_output() -> String { "output".to_string() }
 fn default_build() -> String { "build".to_string() }
@@ -96,6 +127,16 @@ fn default_exclude_locales() -> Vec<String> { vec![] }
 fn default_tts_provider() -> String { "edge-tts".to_string() }
 fn default_sovits_base_url() -> String { "http://127.0.0.1:9880".to_string() }
 fn default_sovits_voice_map() -> String { "sovits_voices.json".to_string() }
+
+fn default_acgnai_concurrency() -> usize { 5 }
+fn default_acgnai_model_list_url() -> String { "https://gsv2p.acgnai.top/models/v4".to_string() }
+fn default_acgnai_infer_url() -> String { "https://gsv2p.acgnai.top/infer_single".to_string() }
+fn default_acgnai_top_k() -> i32 { 10 }
+fn default_acgnai_top_p() -> f64 { 1.0 }
+fn default_acgnai_temperature() -> f64 { 1.0 }
+fn default_acgnai_speed_factor() -> f64 { 1.0 }
+fn default_acgnai_repetition_penalty() -> f64 { 1.35 }
+
 
 impl Config {
     pub fn load() -> Result<Self> {

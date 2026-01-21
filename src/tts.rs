@@ -116,6 +116,9 @@ impl EdgeTtsClient {
             if !v.locale.starts_with(lang_prefix) {
                 return false;
             }
+            if self.config.audio.exclude_locales.contains(&v.locale) {
+                return false;
+            }
             if let Some(g) = gender {
                 if !v.gender.eq_ignore_ascii_case(g) {
                     return false;
@@ -398,5 +401,19 @@ mod tests {
         let client_en = EdgeTtsClient::new_with_voices(&config_en, client.voices_cache.clone());
         let v = client_en.pick_random_voice(Some("Male"));
         assert_eq!(v, "en-US-Male");
+
+        // Test Exclude Locales
+        let mut config_ex = config.clone();
+        config_ex.audio.exclude_locales = vec!["zh-TW".to_string()];
+        let client_ex = EdgeTtsClient::new_with_voices(&config_ex, client.voices_cache.clone());
+        
+        // zh-TW-Female should be excluded
+        // so if we ask for Female, and only zh-TW-Female is available (which matches lang zh), it should fallback
+        let v_female = client_ex.pick_random_voice(Some("Female"));
+        assert_eq!(v_female, "Narrator");
+
+        // If we ask for Neutral/None, it should pick zh-CN-Male because zh-TW-Female is excluded
+        let v_neutral = client_ex.pick_random_voice(None);
+        assert_eq!(v_neutral, "zh-CN-Male");
     }
 }

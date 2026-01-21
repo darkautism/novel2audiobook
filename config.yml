@@ -17,6 +17,7 @@ llm:
 audio:
   provider: edge-tts
   language: zh
+  exclude_locales: ['zh-HK'] # HK翻譯中文品質不好，暫時排除
   edge-tts:
     narrator_voice: zh-TW-HsiaoChenNeural
     default_male_voice: zh-TW-YunJheNeural

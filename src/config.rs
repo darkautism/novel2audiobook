@@ -56,6 +56,9 @@ pub struct AudioConfig {
     pub provider: String,
     #[serde(default = "default_language")]
     pub language: String,
+
+    #[serde(default = "default_exclude_locales")]
+    pub exclude_locales: Vec<String>,
     
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
@@ -87,6 +90,7 @@ fn default_input() -> String { "input".to_string() }
 fn default_output() -> String { "output".to_string() }
 fn default_build() -> String { "build".to_string() }
 fn default_language() -> String { "zh".to_string() }
+fn default_exclude_locales() -> Vec<String> { vec![] }
 fn default_tts_provider() -> String { "edge-tts".to_string() }
 fn default_sovits_base_url() -> String { "http://127.0.0.1:9880".to_string() }
 fn default_sovits_voice_map() -> String { "sovits_voices.json".to_string() }

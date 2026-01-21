@@ -184,7 +184,10 @@ impl WorkflowManager {
                 
             let mut voices = self.tts.list_voices().await.unwrap_or_default();
             // Filter voices by language
-            voices.retain(|v| v.locale.starts_with(&self.config.audio.language));
+            voices.retain(|v| {
+                v.locale.starts_with(&self.config.audio.language) && 
+                !self.config.audio.exclude_locales.contains(&v.locale)
+            });
             
             let voice_list_str = voices.iter()
                 .map(|v| format!("{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}", v.short_name, v.gender, v.locale))
@@ -502,6 +505,87 @@ mod tests {
         assert!(result.is_ok(), "Should complete successfully");
         
         assert_eq!(*call_count.lock().unwrap(), 0, "Should use cache and NOT call LLM");
+
+        let _ = fs::remove_dir_all(test_root);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_voice_filtering_in_analysis_prompt() -> Result<()> {
+        let test_root = Path::new("test_output_filter");
+        if test_root.exists() { fs::remove_dir_all(test_root)?; }
+        
+        let build_dir = test_root.join("build");
+        let input_dir = test_root.join("input");
+        let output_dir = test_root.join("output");
+        
+        fs::create_dir_all(&build_dir)?;
+        fs::create_dir_all(&input_dir)?;
+        fs::create_dir_all(&output_dir)?;
+
+        let config = Config {
+            input_folder: input_dir.to_string_lossy().to_string(),
+            output_folder: output_dir.to_string_lossy().to_string(),
+            build_folder: build_dir.to_string_lossy().to_string(),
+            unattended: false,
+            llm: crate::config::LlmConfig {
+                provider: "mock".to_string(),
+                gemini: None,
+                ollama: None,
+                openai: None,
+            },
+            audio: crate::config::AudioConfig {
+                provider: "edge-tts".to_string(),
+                language: "zh".to_string(),
+                exclude_locales: vec!["zh-HK".to_string()],
+                ..crate::config::AudioConfig::default()
+            },
+        };
+
+        let filename = "chapter_filter.txt";
+        let chapter_path = input_dir.join(filename);
+        fs::write(&chapter_path, "Text")?;
+
+        // Setup Mock LLM to capture prompt
+        struct CapturingLlmClient {
+            prompts: Arc<Mutex<Vec<String>>>,
+        }
+        #[async_trait]
+        impl LlmClient for CapturingLlmClient {
+            async fn chat(&self, _system: &str, user: &str) -> Result<String> {
+                self.prompts.lock().unwrap().push(user.to_string());
+                // Return valid JSON to proceed
+                Ok(r#"{"characters": []}"#.to_string())
+            }
+        }
+        let prompts_store = Arc::new(Mutex::new(Vec::new()));
+        let mock_llm = Box::new(CapturingLlmClient { prompts: prompts_store.clone() });
+
+        // Setup Mock TTS with voices
+        struct MockTts { voices: Vec<crate::tts::Voice> }
+        #[async_trait]
+        impl TtsClient for MockTts {
+            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> { Ok(self.voices.clone()) }
+            async fn synthesize(&self, _: &AudioSegment, _: &CharacterMap) -> Result<Vec<u8>> { Ok(vec![]) }
+        }
+        
+        let voices = vec![
+            crate::tts::Voice { short_name: "zh-TW-A".to_string(), gender: "Male".to_string(), locale: "zh-TW".to_string(), name: "A".to_string(), friendly_name: None },
+            crate::tts::Voice { short_name: "zh-HK-B".to_string(), gender: "Female".to_string(), locale: "zh-HK".to_string(), name: "B".to_string(), friendly_name: None },
+            crate::tts::Voice { short_name: "zh-CN-C".to_string(), gender: "Male".to_string(), locale: "zh-CN".to_string(), name: "C".to_string(), friendly_name: None },
+        ];
+        let mock_tts = Box::new(MockTts { voices });
+
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
+        let _ = workflow.process_chapter(&chapter_path, filename).await;
+
+        let prompts = prompts_store.lock().unwrap();
+        let analysis_prompt = &prompts[0];
+        
+        // Assertions
+        assert!(analysis_prompt.contains("zh-TW-A"));
+        assert!(analysis_prompt.contains("zh-CN-C"));
+        assert!(!analysis_prompt.contains("zh-HK-B"), "Excluded locale voice should not be in prompt");
 
         let _ = fs::remove_dir_all(test_root);
         Ok(())

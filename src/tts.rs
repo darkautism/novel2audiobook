@@ -13,6 +13,8 @@ use rand::seq::IndexedRandom; // For random selection
 pub const VOICE_ID_MOB_MALE: &str = "placeholder_mob_male";
 pub const VOICE_ID_MOB_FEMALE: &str = "placeholder_mob_female";
 pub const VOICE_ID_MOB_NEUTRAL: &str = "placeholder_mob_neutral";
+pub const VOICE_ID_CHAPTER_MOB_MALE: &str = "placeholder_chapter_mob_male";
+pub const VOICE_ID_CHAPTER_MOB_FEMALE: &str = "placeholder_chapter_mob_female";
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const CHROMIUM_MAJOR_VERSION: &str = "143";
@@ -45,7 +47,8 @@ fn get_sec_ch_ua() -> String {
 #[async_trait]
 pub trait TtsClient: Send + Sync {
     async fn list_voices(&self) -> Result<Vec<Voice>>;
-    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap) -> Result<Vec<u8>>;
+    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap, excluded_voices: &[String]) -> Result<Vec<u8>>;
+    async fn get_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> Result<String>;
 }
 
 pub async fn create_tts_client(config: &Config) -> Result<Box<dyn TtsClient>> {
@@ -108,7 +111,7 @@ impl EdgeTtsClient {
         Self { config: config.clone(), voices_cache: voices }
     }
 
-    fn pick_random_voice(&self, gender: Option<&str>) -> String {
+    fn pick_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> String {
         let lang_prefix = &self.config.audio.language;
         let mut rng = rand::rng(); 
 
@@ -117,6 +120,9 @@ impl EdgeTtsClient {
                 return false;
             }
             if self.config.audio.exclude_locales.contains(&v.locale) {
+                return false;
+            }
+            if excluded_voices.contains(&v.short_name) {
                 return false;
             }
             if let Some(g) = gender {
@@ -137,7 +143,7 @@ impl EdgeTtsClient {
         }
     }
 
-    fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap) -> String {
+    fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap, excluded_voices: &[String]) -> String {
         let edge_config = self.config.audio.edge_tts.as_ref();
         
         // 1. Check if Narrator
@@ -154,9 +160,9 @@ impl EdgeTtsClient {
             if let Some(voice_id) = &info.voice_id {
                 // Check for Special Mob IDs
                 match voice_id.as_str() {
-                    VOICE_ID_MOB_MALE => return self.pick_random_voice(Some("Male")),
-                    VOICE_ID_MOB_FEMALE => return self.pick_random_voice(Some("Female")),
-                    VOICE_ID_MOB_NEUTRAL => return self.pick_random_voice(None),
+                    VOICE_ID_MOB_MALE => return self.pick_random_voice(Some("Male"), excluded_voices),
+                    VOICE_ID_MOB_FEMALE => return self.pick_random_voice(Some("Female"), excluded_voices),
+                    VOICE_ID_MOB_NEUTRAL => return self.pick_random_voice(None, excluded_voices),
                     _ => return voice_id.clone(),
                 }
             }
@@ -195,8 +201,8 @@ impl TtsClient for EdgeTtsClient {
         }
     }
 
-    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap) -> Result<Vec<u8>> {
-        let voice = self.resolve_voice(&segment.speaker, char_map);
+    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap, excluded_voices: &[String]) -> Result<Vec<u8>> {
+        let voice = self.resolve_voice(&segment.speaker, char_map, excluded_voices);
         let ssml = format!(
             "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='{}'>{}</voice></speak>",
             voice, segment.text
@@ -207,6 +213,10 @@ impl TtsClient for EdgeTtsClient {
                 .map_err(|e| anyhow!("Edge TTS crate error: {:?}", e))
         })
         .await?
+    }
+
+    async fn get_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> Result<String> {
+        Ok(self.pick_random_voice(gender, excluded_voices))
     }
 }
 
@@ -227,7 +237,7 @@ impl SovitsTtsClient {
         Ok(Self { config: config.clone(), voice_library: library })
     }
 
-    fn pick_random_voice(&self, gender: Option<&str>) -> Option<String> {
+    fn pick_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> Option<String> {
         let mut rng = rand::rng();
         // Sovits voices usually don't have Locale metadata in the struct provided in context 
         // (impl just shows gender/prompt_lang). 
@@ -235,6 +245,9 @@ impl SovitsTtsClient {
         // as Sovits is usually specific.
         
         let candidates: Vec<&String> = self.voice_library.iter().filter_map(|(id, def)| {
+             if excluded_voices.contains(id) {
+                 return None;
+             }
              if let Some(g) = gender {
                  if !def.gender.eq_ignore_ascii_case(g) {
                      return None;
@@ -246,7 +259,7 @@ impl SovitsTtsClient {
         candidates.choose(&mut rng).map(|s| s.to_string())
     }
 
-    fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap) -> Option<String> {
+    fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap, excluded_voices: &[String]) -> Option<String> {
         let sovits_config = self.config.audio.sovits.as_ref()?;
         
         // 1. Narrator
@@ -260,13 +273,13 @@ impl SovitsTtsClient {
                 // Check for Special Mob IDs
                  match voice_id.as_str() {
                      VOICE_ID_MOB_MALE => {
-                         if let Some(v) = self.pick_random_voice(Some("Male")) { return Some(v); }
+                         if let Some(v) = self.pick_random_voice(Some("Male"), excluded_voices) { return Some(v); }
                      },
                      VOICE_ID_MOB_FEMALE => {
-                         if let Some(v) = self.pick_random_voice(Some("Female")) { return Some(v); }
+                         if let Some(v) = self.pick_random_voice(Some("Female"), excluded_voices) { return Some(v); }
                      },
                      VOICE_ID_MOB_NEUTRAL => {
-                         if let Some(v) = self.pick_random_voice(None) { return Some(v); }
+                         if let Some(v) = self.pick_random_voice(None, excluded_voices) { return Some(v); }
                      },
                      _ => return Some(voice_id.clone()),
                  }
@@ -302,8 +315,8 @@ impl TtsClient for SovitsTtsClient {
         Ok(voices)
     }
 
-    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap) -> Result<Vec<u8>> {
-        let voice_id = self.resolve_voice(&segment.speaker, char_map)
+    async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap, excluded_voices: &[String]) -> Result<Vec<u8>> {
+        let voice_id = self.resolve_voice(&segment.speaker, char_map, excluded_voices)
             .ok_or_else(|| anyhow!("No voice resolved for speaker: {}", segment.speaker))?;
 
         let voice_def = self.voice_library.get(&voice_id)
@@ -343,6 +356,11 @@ impl TtsClient for SovitsTtsClient {
 
         let audio_data = resp.bytes().await?.to_vec();
         Ok(audio_data)
+    }
+
+    async fn get_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> Result<String> {
+        self.pick_random_voice(gender, excluded_voices)
+            .ok_or_else(|| anyhow!("No random voice available"))
     }
 }
 
@@ -384,14 +402,14 @@ mod tests {
         let client = EdgeTtsClient::new_with_voices(&config, voices);
         
         // Test filtering
-        let v = client.pick_random_voice(Some("Male"));
+        let v = client.pick_random_voice(Some("Male"), &[]);
         assert_eq!(v, "zh-CN-Male"); // Only one zh Male
         
-        let v = client.pick_random_voice(Some("Female"));
+        let v = client.pick_random_voice(Some("Female"), &[]);
         assert_eq!(v, "zh-TW-Female");
         
         // Test Neutral (should pick either zh-CN-Male or zh-TW-Female)
-        let v = client.pick_random_voice(None);
+        let v = client.pick_random_voice(None, &[]);
         assert!(v == "zh-CN-Male" || v == "zh-TW-Female");
         
         // Test Language mismatch
@@ -399,7 +417,7 @@ mod tests {
         let mut config_en = config.clone();
         config_en.audio.language = "en".to_string();
         let client_en = EdgeTtsClient::new_with_voices(&config_en, client.voices_cache.clone());
-        let v = client_en.pick_random_voice(Some("Male"));
+        let v = client_en.pick_random_voice(Some("Male"), &[]);
         assert_eq!(v, "en-US-Male");
 
         // Test Exclude Locales
@@ -409,11 +427,16 @@ mod tests {
         
         // zh-TW-Female should be excluded
         // so if we ask for Female, and only zh-TW-Female is available (which matches lang zh), it should fallback
-        let v_female = client_ex.pick_random_voice(Some("Female"));
+        let v_female = client_ex.pick_random_voice(Some("Female"), &[]);
         assert_eq!(v_female, "Narrator");
 
         // If we ask for Neutral/None, it should pick zh-CN-Male because zh-TW-Female is excluded
-        let v_neutral = client_ex.pick_random_voice(None);
+        let v_neutral = client_ex.pick_random_voice(None, &[]);
         assert_eq!(v_neutral, "zh-CN-Male");
+
+        // Test Excluded Voices
+        let v_excluded = client.pick_random_voice(Some("Male"), &["zh-CN-Male".to_string()]);
+        // Should fallback to narrator because the only male voice is excluded
+        assert_eq!(v_excluded, "Narrator");
     }
 }

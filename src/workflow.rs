@@ -1,6 +1,9 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::tts::{TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL};
+use crate::tts::{
+    TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL,
+    VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_CHAPTER_MOB_FEMALE,
+};
 use crate::state::{WorkflowState, CharacterMap, CharacterInfo};
 use crate::script::{ScriptGenerator, JsonScriptGenerator, PlainScriptGenerator, strip_code_blocks, AudioSegment};
 use anyhow::{Result, Context};
@@ -33,6 +36,26 @@ impl WorkflowManager {
                 gender: "Male".to_string(),
                 voice_id: Some(VOICE_ID_MOB_MALE.to_string()),
                 description: Some("一般男性路人".to_string()),
+                ..Default::default()
+            });
+            map_updated = true;
+        }
+        // Chapter Mobs
+        if !character_map.characters.contains_key("章節路人(男)") {
+            character_map.characters.insert("章節路人(男)".to_string(), CharacterInfo {
+                gender: "Male".to_string(),
+                voice_id: Some(VOICE_ID_CHAPTER_MOB_MALE.to_string()),
+                description: Some("本章節內的男性路人，聲音在該章節內固定".to_string()),
+                ..Default::default()
+            });
+            map_updated = true;
+        }
+        if !character_map.characters.contains_key("章節路人(女)") {
+            character_map.characters.insert("章節路人(女)".to_string(), CharacterInfo {
+                gender: "Female".to_string(),
+                voice_id: Some(VOICE_ID_CHAPTER_MOB_FEMALE.to_string()),
+                description: Some("本章節內的女性路人，聲音在該章節內固定".to_string()),
+                ..Default::default()
             });
             map_updated = true;
         }
@@ -41,6 +64,7 @@ impl WorkflowManager {
                 gender: "Female".to_string(),
                 voice_id: Some(VOICE_ID_MOB_FEMALE.to_string()),
                 description: Some("一般女性路人".to_string()),
+                ..Default::default()
             });
             map_updated = true;
         }
@@ -49,6 +73,7 @@ impl WorkflowManager {
                 gender: "Neutral".to_string(),
                 voice_id: Some(VOICE_ID_MOB_NEUTRAL.to_string()),
                 description: Some("一般路人".to_string()),
+                ..Default::default()
             });
             map_updated = true;
         }
@@ -208,15 +233,17 @@ impl WorkflowManager {
                 \n3. 可用聲音列表 (Available Voices):\n[{}]\
                 \n\n指令 (Instructions):\
                 \n- 識別文本中的說話角色，確定性別（Male/Female）及是否為主要角色。\
+                \n- 若角色為「主角」(Protagonist)，請將 \"is_protagonist\" 欄位設為 true。\
                 \n- 若角色已存在於「目前已存在的角色」中，請使用相同的名稱。\
-                \n- 若文本為第一人稱（如「我」），請識別主角，並將其 voice_id 設定為旁白聲音 ID。\
+                \n- 若文本為第一人稱（如「我」），請識別主角，將其 voice_id 設定為旁白聲音 ID，並設定 \"is_protagonist\": true。\
                 \n- 主要角色，尤其主角，請避免重複使用該聲音。旁白亦同。\
                 \n- 對於新角色，你可以從「可用聲音列表」中選擇合適的 voice_id (選填)，否則留空。\
-                \n- 系統已內建路人、路人(男)、路人(女)三個角色，請勿重複創建。\
-                \n- 不重要的丟棄式角色請直接使用路人。\
+                \n- 系統已內建路人、路人(男)、路人(女)、章節路人(男)、章節路人(女)等角色，請勿重複創建。\
+                \n- 章節內話多但後續不出現的角色，請使用「章節路人(男)」或「章節路人(女)」。\
+                \n- 不重要的丟棄式角色請直接使用路人、路人(男)或路人(女)。\
                 \n- 創建的JSON對象由於是key必須使用繁體中文。使用簡體將導致程式出錯。\
                 \n\n請僅返回一個 JSON 對象：\
-                {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
+                {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"is_protagonist\": true/false, \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
                 \n\n文本：\n{}", 
                 existing_chars_str,
                 narrator_voice_id,
@@ -243,6 +270,8 @@ impl WorkflowManager {
                 description: Option<String>,
                 #[serde(default)]
                 voice_id: Option<String>,
+                #[serde(default)]
+                is_protagonist: bool,
             }
             
             // Clean markdown code blocks if present
@@ -260,6 +289,7 @@ impl WorkflowManager {
                             gender: char.gender,
                             voice_id: char.voice_id, 
                             description: char.description,
+                            is_protagonist: char.is_protagonist,
                         });
                         updated_map = true;
                     },
@@ -292,6 +322,41 @@ impl WorkflowManager {
 
         // 3. Synthesize
         println!("Synthesizing audio ({} segments)...", segments.len());
+
+        // Build Excluded Voices (Narrator + Protagonists)
+        let mut excluded_voices = Vec::new();
+        let narrator_voice_id = match self.config.audio.provider.as_str() {
+            "edge-tts" => self.config.audio.edge_tts.as_ref().and_then(|c| c.narrator_voice.clone()),
+            "sovits-offline" => self.config.audio.sovits.as_ref().and_then(|c| c.narrator_voice.clone()),
+            _ => None,
+        }.unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+        
+        excluded_voices.push(narrator_voice_id);
+
+        for char_info in self.character_map.characters.values() {
+            if char_info.is_protagonist {
+                 if let Some(vid) = &char_info.voice_id {
+                     if !excluded_voices.contains(vid) {
+                         excluded_voices.push(vid.clone());
+                     }
+                 }
+            }
+        }
+
+        // Resolve Chapter Mobs
+        let mut chapter_map_local = self.character_map.clone();
+        
+        if let Ok(vid) = self.tts.get_random_voice(Some("Male"), &excluded_voices).await {
+             if let Some(info) = chapter_map_local.characters.get_mut("章節路人(男)") {
+                 info.voice_id = Some(vid);
+             }
+        }
+
+        if let Ok(vid) = self.tts.get_random_voice(Some("Female"), &excluded_voices).await {
+             if let Some(info) = chapter_map_local.characters.get_mut("章節路人(女)") {
+                 info.voice_id = Some(vid);
+             }
+        }
         
         let mut audio_files = Vec::new();
 
@@ -305,7 +370,7 @@ impl WorkflowManager {
 
             println!("Synthesizing chunk {}/{}", i + 1, segments.len());
             // Retry logic?
-            let audio_data = self.tts.synthesize(segment, &self.character_map).await?;
+            let audio_data = self.tts.synthesize(segment, &chapter_map_local, &excluded_voices).await?;
             fs::write(&chunk_path, audio_data)?;
             audio_files.push(chunk_path);
         }
@@ -380,12 +445,15 @@ mod tests {
         async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
             Ok(vec![])
         }
-        async fn synthesize(&self, _segment: &AudioSegment, _map: &CharacterMap) -> Result<Vec<u8>> {
+        async fn synthesize(&self, _segment: &AudioSegment, _map: &CharacterMap, _excluded_voices: &[String]) -> Result<Vec<u8>> {
             if self.should_fail {
                 Err(anyhow::anyhow!("Mock TTS error"))
             } else {
                 Ok(vec![0u8; 10])
             }
+        }
+        async fn get_random_voice(&self, _gender: Option<&str>, _excluded_voices: &[String]) -> Result<String> {
+             Ok("mock_voice_id".to_string())
         }
     }
 
@@ -629,7 +697,8 @@ mod tests {
         #[async_trait]
         impl TtsClient for MockTts {
             async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> { Ok(self.voices.clone()) }
-            async fn synthesize(&self, _: &AudioSegment, _: &CharacterMap) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn synthesize(&self, _: &AudioSegment, _: &CharacterMap, _: &[String]) -> Result<Vec<u8>> { Ok(vec![]) }
+            async fn get_random_voice(&self, _: Option<&str>, _: &[String]) -> Result<String> { Ok("mock".to_string()) }
         }
         
         let voices = vec![
@@ -649,6 +718,110 @@ mod tests {
         assert!(analysis_prompt.contains("zh-TW-A"));
         assert!(analysis_prompt.contains("zh-CN-C"));
         assert!(!analysis_prompt.contains("zh-HK-B"), "Excluded locale voice should not be in prompt");
+
+        let _ = fs::remove_dir_all(test_root);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_protagonist_exclusion_and_chapter_mob() -> Result<()> {
+        let test_root = Path::new("test_output_protag");
+        if test_root.exists() { fs::remove_dir_all(test_root)?; }
+        
+        let build_dir = test_root.join("build");
+        let input_dir = test_root.join("input");
+        let output_dir = test_root.join("output");
+        fs::create_dir_all(&build_dir)?;
+        fs::create_dir_all(&input_dir)?;
+        fs::create_dir_all(&output_dir)?;
+
+        let config = Config {
+            input_folder: input_dir.to_string_lossy().to_string(),
+            output_folder: output_dir.to_string_lossy().to_string(),
+            build_folder: build_dir.to_string_lossy().to_string(),
+            unattended: false,
+            llm: crate::config::LlmConfig {
+                provider: "mock".to_string(),
+                gemini: None,
+                ollama: None,
+                openai: None,
+            },
+            audio: crate::config::AudioConfig {
+                provider: "edge-tts".to_string(),
+                edge_tts: Some(crate::config::EdgeTtsConfig {
+                    narrator_voice: Some("Voice_Narrator".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        };
+
+        let filename = "chapter_test.txt";
+        fs::write(input_dir.join(filename), "Text")?;
+
+        // Mock LLM: Returns Protag
+        struct ProtagLlm;
+        #[async_trait]
+        impl LlmClient for ProtagLlm {
+            async fn chat(&self, _: &str, user: &str) -> Result<String> {
+                if user.contains("請分析以下文本") {
+                    return Ok(r#"{
+                        "characters": [
+                            { "name": "Hero", "gender": "Male", "is_protagonist": true, "voice_id": "Voice_Hero" },
+                            { "name": "章節路人(男)", "gender": "Male", "voice_id": "placeholder_chapter_mob_male" }
+                        ]
+                    }"#.to_string());
+                }
+                // Script gen
+                Ok(r#"[
+                    {"speaker": "Hero", "text": "I am hero."},
+                    {"speaker": "章節路人(男)", "text": "I am mob."}
+                ]"#.to_string())
+            }
+        }
+
+        // Mock TTS: Captures exclusions
+        struct VerifyingTts {
+            exclusions: Arc<Mutex<Vec<String>>>,
+        }
+        #[async_trait]
+        impl TtsClient for VerifyingTts {
+             async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> { Ok(vec![]) }
+             async fn synthesize(&self, segment: &AudioSegment, map: &CharacterMap, excluded: &[String]) -> Result<Vec<u8>> {
+                 let mut ex = self.exclusions.lock().unwrap();
+                 *ex = excluded.to_vec();
+                 
+                 // Verify Chapter Mob resolution
+                 if segment.speaker == "章節路人(男)" {
+                     let info = map.characters.get("章節路人(男)").unwrap();
+                     assert_eq!(info.voice_id.as_deref(), Some("Voice_Mob_Male_Fixed"));
+                 }
+                 
+                 Ok(vec![])
+             }
+             async fn get_random_voice(&self, gender: Option<&str>, excluded: &[String]) -> Result<String> {
+                 // Verify exclusion list is passed here too
+                 assert!(excluded.contains(&"Voice_Narrator".to_string()));
+                 assert!(excluded.contains(&"Voice_Hero".to_string()));
+                 
+                 if gender == Some("Male") {
+                     Ok("Voice_Mob_Male_Fixed".to_string())
+                 } else {
+                     Ok("Voice_Mob_Female_Fixed".to_string())
+                 }
+             }
+        }
+        
+        let exclusions = Arc::new(Mutex::new(Vec::new()));
+        let mock_tts = Box::new(VerifyingTts { exclusions: exclusions.clone() });
+        let mock_llm = Box::new(ProtagLlm);
+
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
+        workflow.process_chapter(&input_dir.join(filename), filename).await?;
+
+        let ex = exclusions.lock().unwrap();
+        assert!(ex.contains(&"Voice_Narrator".to_string()));
+        assert!(ex.contains(&"Voice_Hero".to_string()));
 
         let _ = fs::remove_dir_all(test_root);
         Ok(())

@@ -11,9 +11,11 @@ pub struct CharacterMap {
     pub characters: HashMap<String, CharacterInfo>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct CharacterInfo {
     pub gender: String, // "Male", "Female"
     pub voice_id: Option<String>,
     pub description: Option<String>, // Context for LLM
+    #[serde(default)]
+    pub is_protagonist: bool,
 }

@@ -3,6 +3,8 @@ mod llm;
 mod tts;
 mod setup;
 mod workflow;
+mod state;
+mod script;
 
 use anyhow::Result;
 use config::Config;

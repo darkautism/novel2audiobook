@@ -1,30 +1,15 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::tts::TtsClient;
+use crate::state::{WorkflowState, CharacterMap, CharacterInfo};
+use crate::script::{ScriptGenerator, SsmlScriptGenerator, PlainScriptGenerator, strip_code_blocks};
 use anyhow::{Result, Context};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use tokio::fs as tokio_fs;
 use std::path::Path;
 use std::io::Write;
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct WorkflowState {
-    pub completed_chapters: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct CharacterMap {
-    pub characters: HashMap<String, CharacterInfo>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct CharacterInfo {
-    pub gender: String, // "Male", "Female"
-    pub voice_id: Option<String>,
-    pub description: Option<String>, // Context for LLM
-}
 
 pub struct WorkflowManager {
     config: Config,
@@ -32,6 +17,7 @@ pub struct WorkflowManager {
     state: WorkflowState,
     character_map: CharacterMap,
     tts: Box<dyn TtsClient>,
+    script_generator: Box<dyn ScriptGenerator>,
 }
 
 impl WorkflowManager {
@@ -39,12 +25,18 @@ impl WorkflowManager {
         let state = Self::load_state(&config.build_folder)?;
         let character_map = Self::load_character_map(&config.build_folder)?;
         
+        let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
+            "edge-tts" => Box::new(SsmlScriptGenerator::new(&config)),
+            _ => Box::new(PlainScriptGenerator::new()),
+        };
+
         Ok(Self {
             config,
             llm,
             state,
             character_map,
             tts,
+            script_generator,
         })
     }
 
@@ -178,52 +170,19 @@ impl WorkflowManager {
                 self.save_character_map()?;
             }
 
-            // 2. SSML Generation
-            println!("Generating SSML...");
-            let characters_json = serde_json::to_string(&self.character_map.characters)?;
-            let ssml_prompt = format!(
-                "請將以下小說文本轉換為 Edge TTS 的 SSML。\
-                使用提供的角色映射進行語音分配。\
-                對於有 'voice_id' 的角色，請使用該語音。\
-                對於其他人，請使用性別來選擇通用語調（但在此處不選擇語音名稱，僅在需要時標記角色/性別，或者僅輸出文本片段）。\
-                \n\n\
-                實際上，為了簡單起見：\
-                輸出一個字符串的 JSON 列表。每個字符串都是一個有效的 SSML <speak> 塊。\
-                將文本分解為邏輯段落（段落或對話）。\
-                使用 <voice name='...'> 標籤。\
-                \n\
-                配置：\
-                默認男性語音：'{}'\n\
-                默認女性語音：'{}'\n\
-                旁白語音：'{}'\n\
-                \n\
-                角色映射：{}\n\
-                \n\
-                規則：\
-                1. 每個段落都使用 <voice name='...'>。\n\
-                2. 對於旁白，使用旁白語音。\n\
-                3. 對於對話，檢查說話者。如果在角色映射中且有 voice_id，則使用它。\n\
-                   如果沒有 voice_id，根據性別使用默認男性/女性語音。\n\
-                4. 如果上下文建議，調整 <prosody> 以表達情感。\n\
-                5. 僅返回 JSON：[ \"<speak>...</speak>\", ... ] \
-                \n\n文本：\n{}",
-                self.config.audio.default_male_voice.as_deref().unwrap_or(""),
-                self.config.audio.default_female_voice.as_deref().unwrap_or(""),
-                self.config.audio.narrator_voice.as_deref().unwrap_or(""),
-                characters_json,
-                text
-            );
-
-            let ssml_json = self.llm.chat("你是一個 SSML 生成器。請僅返回有效的 JSON。", &ssml_prompt).await?;
-            let clean_ssml_json = strip_code_blocks(&ssml_json);
+            // 2. Script Generation
+            println!("Generating Script...");
             
-            let ssml_segments: Vec<String> = serde_json::from_str(&clean_ssml_json)
-                .context(format!("Failed to parse SSML JSON: {}", clean_ssml_json))?;
-
-            // Save SSML to cache
-            fs::write(&ssml_path, serde_json::to_string_pretty(&ssml_segments)?)?;
+            let prompt = self.script_generator.generate_prompt(&text, &self.character_map)?;
+            let system_instruction = self.script_generator.get_system_prompt();
             
-            ssml_segments
+            let script_json = self.llm.chat(&system_instruction, &prompt).await?;
+            let segments = self.script_generator.parse_response(&script_json)?;
+
+            // Save Script to cache
+            fs::write(&ssml_path, serde_json::to_string_pretty(&segments)?)?;
+            
+            segments
         };
 
         // 3. Synthesize
@@ -261,17 +220,6 @@ impl WorkflowManager {
 
         println!("Chapter complete: {:?}", final_audio_path);
         Ok(())
-    }
-}
-
-fn strip_code_blocks(s: &str) -> String {
-    let s = s.trim();
-    if s.starts_with("```json") {
-        s.trim_start_matches("```json").trim_end_matches("```").trim().to_string()
-    } else if s.starts_with("```") {
-        s.trim_start_matches("```").trim_end_matches("```").trim().to_string()
-    } else {
-        s.to_string()
     }
 }
 
@@ -361,7 +309,10 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig::default(),
+            audio: crate::config::AudioConfig {
+                provider: "edge-tts".to_string(), // Explicitly set edge-tts to use SsmlGenerator
+                ..crate::config::AudioConfig::default()
+            },
         };
 
         let filename = "chapter_1.txt";
@@ -421,7 +372,10 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig::default(),
+            audio: crate::config::AudioConfig {
+                provider: "edge-tts".to_string(),
+                ..crate::config::AudioConfig::default()
+            },
         };
 
         let filename = "chapter_2.txt";

@@ -73,21 +73,27 @@ pub async fn load_or_refresh_metadata(
             .await
             .context("Failed to parse Acgnai models JSON")?;
 
-        let new_models = api_data.models.keys().into_iter().cloned().collect::<Vec<String>>();
-        println!("llm: {:?}", llm.is_some());
+        let new_models = api_data
+            .models
+            .keys()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<String>>();
         if let Some(llm_client) = llm {
             println!("Classifying Acgnai voices via LLM...");
             // Process in chunks
-            for chunk in new_models.chunks(50) {
+            for chunk in new_models.chunks(500) {
                 let prompt = format!(
                      "請分析以下角色名稱，並猜測他們的性別。並根據該作品分析角色的標籤，如年長、年幼、開朗、深沉之類的\n\
                      Names: {:?}\n\
                      所有的姓名將被作為key，所以請勿修改.\n\
+                     我們服務的目標語言是 {}，故可以略過完全無關的語言(Key內通常帶有語言資訊)\n\
                      你應該回傳如下的JSON陣列 {{ \"gender\": \"Male\"/\"Female\", \"tags\": [\"Tag1\", \"Tag2\"] }}.\n\
                      For gender, use 'Male' or 'Female'. Defaults to 'Female' if unsure.\n\
                      Use Traditional Chinese for tags.\n\
                      Ensure the JSON is valid.",
-                     chunk
+                     chunk,
+                     config.audio.language,
                  );
 
                 match llm_client
@@ -120,7 +126,6 @@ pub async fn load_or_refresh_metadata(
             }
         }
 
-        panic!("stop!");
         // Fill remaining with defaults
         for name in new_models {
             if !local_map.contains_key(&name) {
@@ -143,8 +148,6 @@ pub async fn load_or_refresh_metadata(
         println!("Updated acgnai-voice.json");
         local_map
     };
-
-           
 
     Ok(local_map)
 }

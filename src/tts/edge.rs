@@ -29,7 +29,7 @@ fn get_sec_ch_ua() -> String {
 
 // --- Shared Helper for EdgeTTS ---
 
-async fn list_voices_http() -> Result<Vec<Voice>> {
+pub async fn list_voices() -> Result<Vec<Voice>> {
     let url = format!(
         "{}?trustedclienttoken={}",
         LIST_VOICES_URL, TRUSTED_CLIENT_TOKEN
@@ -79,7 +79,7 @@ pub struct EdgeTtsClient {
 impl EdgeTtsClient {
     pub async fn new(config: &Config) -> Result<Self> {
         // Pre-fetch voices for caching
-        let voices_cache = list_voices_http().await.unwrap_or_else(|e| {
+        let voices_cache = list_voices().await.unwrap_or_else(|e| {
             eprintln!(
                 "Warning: Failed to fetch EdgeTTS voices for random selection: {}",
                 e
@@ -208,7 +208,7 @@ impl TtsClient for EdgeTtsClient {
         if !self.voices_cache.is_empty() {
             Ok(self.voices_cache.clone())
         } else {
-            list_voices_http().await
+            list_voices().await
         }
     }
 

@@ -43,11 +43,16 @@ pub trait TtsClient: Send + Sync {
     }
 }
 
+pub async fn fetch_voice_list(config: &Config, llm: Option<&Box<dyn crate::llm::LlmClient>>) -> Result<Vec<Voice>> {
+    match config.audio.provider.as_str() {
+        "edge-tts" => edge::list_voices().await,
+        "sovits-offline" => sovits::list_voices(config),
+        "acgnai" => acgnai::list_voices(config, llm).await,
+        _ => Err(anyhow::anyhow!("Unknown TTS provider: {}", config.audio.provider)),
+    }
+}
+
 pub async fn create_tts_client(config: &Config, llm: Option<&Box<dyn crate::llm::LlmClient>>) -> Result<Box<dyn TtsClient>> {
-    
-    println!("llm: {:?}", llm.is_some());
-    assert!(llm.is_some());
-    
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
         "sovits-offline" => Ok(Box::new(sovits::SovitsTtsClient::new(config).await?)),

@@ -31,13 +31,11 @@ async fn main() -> Result<()> {
 
     config.ensure_directories()?;
 
-    // 2. Interactive Setup (Voice Selection)
-    setup::run_setup(&mut config).await?;
-
-    // 3. Initialize LLM
+    // 2. Initialize LLM
     let llm = llm::create_llm(&config)?;
-    
-    println!("MAIN: LLM Address: {:p}", &llm);
+
+    // 3. Interactive Setup (Voice Selection)
+    setup::run_setup(&mut config, Some(&llm)).await?;
     
     // 4. Initialize TTS
     let tts = tts::create_tts_client(&config, Some(&llm)).await?;

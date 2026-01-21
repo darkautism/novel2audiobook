@@ -16,6 +16,23 @@ use tokio::sync::Semaphore;
 use std::process::{Command, Stdio};
 use std::io::Write;
 
+pub async fn list_voices(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Vec<Voice>> {
+    let metadata = load_or_refresh_metadata(config, llm).await?;
+    Ok(metadata_to_voices(&metadata))
+}
+
+fn metadata_to_voices(metadata: &AcgnaiVoiceMap) -> Vec<Voice> {
+    metadata.iter().map(|(name, meta)| {
+        Voice {
+            name: name.clone(),
+            short_name: name.clone(),
+            gender: meta.gender.clone(),
+            locale: "zh".to_string(),
+            friendly_name: Some(format!("{} {:?}", name, meta.tags)),
+        }
+    }).collect()
+}
+
 pub struct AcgnaiClient {
     config: Config,
     metadata: AcgnaiVoiceMap,
@@ -124,16 +141,7 @@ impl AcgnaiClient {
 #[async_trait]
 impl TtsClient for AcgnaiClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
-        let voices = self.metadata.iter().map(|(name, meta)| {
-            Voice {
-                name: name.clone(),
-                short_name: name.clone(),
-                gender: meta.gender.clone(),
-                locale: "zh".to_string(),
-                friendly_name: Some(format!("{} {:?}", name, meta.tags)),
-            }
-        }).collect();
-        Ok(voices)
+        Ok(metadata_to_voices(&self.metadata))
     }
 
     async fn get_voice_styles(&self, voice_id: &str) -> Result<Vec<String>> {

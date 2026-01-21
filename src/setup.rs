@@ -1,25 +1,18 @@
 use crate::config::Config;
-use crate::tts::{create_tts_client, Voice};
+use crate::tts::{fetch_voice_list, Voice};
+use crate::llm::LlmClient;
 use anyhow::{Result, anyhow};
 use inquire::Select;
 
-pub async fn run_setup(config: &mut Config) -> Result<()> {
+pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) -> Result<()> {
     let mut needs_save = false;
     let provider = config.audio.provider.clone();
-
-    // Initialize factory (async)
-    // For SoVITS, this loads the voice library.
-    let tts = create_tts_client(config, None).await?;
 
     match provider.as_str() {
         "edge-tts" => {
             if config.audio.edge_tts.is_none() {
                 config.audio.edge_tts = Some(Default::default());
             }
-            // We need to re-borrow config mutably after using it immutable in create_tts_client?
-            // create_tts_client took &Config.
-            // We have &mut Config.
-            // Rust should allow this if scopes are correct.
             
             // Check if setup needed
             let setup_needed = {
@@ -31,7 +24,7 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
 
             if setup_needed {
                 println!("Fetching Edge-TTS voices...");
-                let voices = tts.list_voices().await?;
+                let voices = fetch_voice_list(config, llm).await?;
                 let lang = &config.audio.language;
                 let filtered_voices: Vec<Voice> = voices.into_iter()
                     .filter(|v| v.locale.starts_with(lang))
@@ -78,7 +71,7 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
 
              if setup_needed {
                  println!("Loading SoVITS voices from library...");
-                 let voices = tts.list_voices().await?;
+                 let voices = fetch_voice_list(config, llm).await?;
                  
                  if voices.is_empty() {
                      return Err(anyhow!("No SoVITS voices found. Check sovits_voices.json"));
@@ -127,7 +120,7 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
 
             if setup_needed {
                 println!("Fetching Acgnai models...");
-                let voices = tts.list_voices().await?;
+                let voices = fetch_voice_list(config, llm).await?;
                 
                 if voices.is_empty() {
                     return Err(anyhow!("No Acgnai models found. Please check internet connection or config."));

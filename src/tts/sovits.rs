@@ -7,6 +7,31 @@ use rand::seq::IndexedRandom;
 use crate::sovits::SovitsVoiceLibrary;
 use crate::tts::{Voice, TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL};
 
+pub fn list_voices(config: &Config) -> Result<Vec<Voice>> {
+    let path = config
+        .audio
+        .sovits
+        .as_ref()
+        .map(|c| c.voice_map_path.clone())
+        .unwrap_or_else(|| "sovits_voices.json".to_string());
+
+    let library = crate::sovits::load_sovits_voices(&path)?;
+    Ok(library_to_voices(&library))
+}
+
+fn library_to_voices(library: &SovitsVoiceLibrary) -> Vec<Voice> {
+    library
+        .iter()
+        .map(|(id, def)| Voice {
+            name: format!("{} ({:?})", id, def.tags),
+            short_name: id.clone(),
+            gender: def.gender.clone(),
+            locale: def.prompt_lang.clone(),
+            friendly_name: Some(format!("{} - {:?}", id, def.tags)),
+        })
+        .collect()
+}
+
 // --- SoVITS Client ---
 
 pub struct SovitsTtsClient {
@@ -114,19 +139,7 @@ impl SovitsTtsClient {
 #[async_trait]
 impl TtsClient for SovitsTtsClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
-        // Return voices from the library converted to Voice struct
-        let voices = self
-            .voice_library
-            .iter()
-            .map(|(id, def)| Voice {
-                name: format!("{} ({:?})", id, def.tags),
-                short_name: id.clone(),
-                gender: def.gender.clone(),
-                locale: def.prompt_lang.clone(),
-                friendly_name: Some(format!("{} - {:?}", id, def.tags)),
-            })
-            .collect();
-        Ok(voices)
+        Ok(library_to_voices(&self.voice_library))
     }
 
     async fn synthesize(

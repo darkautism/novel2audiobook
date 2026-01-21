@@ -53,6 +53,28 @@ pub struct AudioConfig {
     pub provider: String,
     #[serde(default = "default_language")]
     pub language: String,
+    
+    #[serde(rename = "edge-tts")]
+    pub edge_tts: Option<EdgeTtsConfig>,
+    
+    #[serde(rename = "sovits-offline")]
+    pub sovits: Option<SovitsConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct EdgeTtsConfig {
+    pub narrator_voice: Option<String>,
+    pub default_male_voice: Option<String>,
+    pub default_female_voice: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SovitsConfig {
+    #[serde(default = "default_sovits_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_sovits_voice_map")]
+    pub voice_map_path: String,
+    
     pub narrator_voice: Option<String>,
     pub default_male_voice: Option<String>,
     pub default_female_voice: Option<String>,
@@ -63,6 +85,8 @@ fn default_output() -> String { "output".to_string() }
 fn default_build() -> String { "build".to_string() }
 fn default_language() -> String { "zh".to_string() }
 fn default_tts_provider() -> String { "edge-tts".to_string() }
+fn default_sovits_base_url() -> String { "http://127.0.0.1:9880".to_string() }
+fn default_sovits_voice_map() -> String { "sovits_voices.json".to_string() }
 
 impl Config {
     pub fn load() -> Result<Self> {

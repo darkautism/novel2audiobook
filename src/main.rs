@@ -5,6 +5,7 @@ mod setup;
 mod workflow;
 mod state;
 mod script;
+mod sovits;
 
 use anyhow::Result;
 use config::Config;
@@ -36,7 +37,7 @@ async fn main() -> Result<()> {
     let llm = llm::create_llm(&config)?;
 
     // 4. Initialize TTS
-    let tts = tts::create_tts_client(&config)?;
+    let tts = tts::create_tts_client(&config).await?;
 
     // 5. Initialize and Run Workflow
     let mut manager = WorkflowManager::new(config.clone(), llm, tts)?;

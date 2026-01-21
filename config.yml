@@ -17,6 +17,10 @@ llm:
 audio:
   provider: edge-tts
   language: zh
-  narrator_voice: zh-TW-HsiaoChenNeural
-  default_male_voice: zh-TW-YunJheNeural
-  default_female_voice: zh-TW-HsiaoYuNeural
+  edge-tts:
+    narrator_voice: zh-TW-HsiaoChenNeural
+    default_male_voice: zh-TW-YunJheNeural
+    default_female_voice: zh-TW-HsiaoYuNeural
+  sovits-offline:
+    base_url: http://127.0.0.1:9880
+    voice_map_path: sovits_voices.json

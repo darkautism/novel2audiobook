@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::tts::TtsClient;
 use crate::state::{WorkflowState, CharacterMap, CharacterInfo};
-use crate::script::{ScriptGenerator, SsmlScriptGenerator, PlainScriptGenerator, strip_code_blocks};
+use crate::script::{ScriptGenerator, JsonScriptGenerator, PlainScriptGenerator, strip_code_blocks, AudioSegment};
 use anyhow::{Result, Context};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ impl WorkflowManager {
         let character_map = Self::load_character_map(&config.build_folder)?;
         
         let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
-            "edge-tts" => Box::new(SsmlScriptGenerator::new(&config)),
+            "edge-tts" | "sovits-offline" => Box::new(JsonScriptGenerator::new(&config)),
             _ => Box::new(PlainScriptGenerator::new()),
         };
 
@@ -112,11 +112,11 @@ impl WorkflowManager {
         
         let chapter_build_dir = Path::new(&self.config.build_folder).join(filename.replace(".", "_"));
         fs::create_dir_all(&chapter_build_dir)?;
-        let ssml_path = chapter_build_dir.join("SSML.json");
+        let segments_path = chapter_build_dir.join("segments.json");
 
-        let ssml_segments: Vec<String> = if ssml_path.exists() {
-            println!("Loading cached SSML from {:?}", ssml_path);
-            let content = fs::read_to_string(&ssml_path)?;
+        let segments: Vec<AudioSegment> = if segments_path.exists() {
+            println!("Loading cached segments from {:?}", segments_path);
+            let content = fs::read_to_string(&segments_path)?;
             serde_json::from_str(&content)?
         } else {
             // 1. Analyze Characters
@@ -144,7 +144,7 @@ impl WorkflowManager {
                 name: String,
                 gender: String,
                 #[serde(default)]
-                important: bool,
+                _important: bool,
                 #[serde(default)]
                 description: Option<String>,
             }
@@ -180,17 +180,17 @@ impl WorkflowManager {
             let segments = self.script_generator.parse_response(&script_json)?;
 
             // Save Script to cache
-            fs::write(&ssml_path, serde_json::to_string_pretty(&segments)?)?;
+            fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
             
             segments
         };
 
         // 3. Synthesize
-        println!("Synthesizing audio ({} segments)...", ssml_segments.len());
+        println!("Synthesizing audio ({} segments)...", segments.len());
         
         let mut audio_files = Vec::new();
 
-        for (i, ssml) in ssml_segments.iter().enumerate() {
+        for (i, segment) in segments.iter().enumerate() {
             let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
             if chunk_path.exists() {
                 // simple resume within chapter
@@ -198,9 +198,9 @@ impl WorkflowManager {
                 continue; 
             }
 
-            println!("Synthesizing chunk {}/{}", i + 1, ssml_segments.len());
+            println!("Synthesizing chunk {}/{}", i + 1, segments.len());
             // Retry logic?
-            let audio_data = self.tts.synthesize(ssml).await?;
+            let audio_data = self.tts.synthesize(segment, &self.character_map).await?;
             fs::write(&chunk_path, audio_data)?;
             audio_files.push(chunk_path);
         }
@@ -260,8 +260,8 @@ mod tests {
             
             if user.contains("請分析以下文本") {
                 return Ok(r#"{"characters": [{"name": "Hero", "gender": "Male"}]}"#.to_string());
-            } else if user.contains("請將以下小說文本轉換為 Edge TTS 的 SSML") {
-                return Ok(r#"["<speak>Test audio</speak>"]"#.to_string());
+            } else if user.contains("請將以下小說文本分解為對話和旁白段落") {
+                return Ok(r#"[{"speaker": "旁白", "text": "Test audio"}]"#.to_string());
             }
             
             Ok("{}".to_string())
@@ -277,7 +277,7 @@ mod tests {
         async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
             Ok(vec![])
         }
-        async fn synthesize(&self, _ssml: &str) -> Result<Vec<u8>> {
+        async fn synthesize(&self, _segment: &AudioSegment, _map: &CharacterMap) -> Result<Vec<u8>> {
             if self.should_fail {
                 Err(anyhow::anyhow!("Mock TTS error"))
             } else {
@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cache_miss_generates_ssml_file() -> Result<()> {
+    async fn test_cache_miss_generates_segments_file() -> Result<()> {
         let test_root = Path::new("test_output_miss");
         if test_root.exists() { fs::remove_dir_all(test_root)?; }
         
@@ -310,7 +310,7 @@ mod tests {
                 openai: None,
             },
             audio: crate::config::AudioConfig {
-                provider: "edge-tts".to_string(), // Explicitly set edge-tts to use SsmlGenerator
+                provider: "edge-tts".to_string(),
                 ..crate::config::AudioConfig::default()
             },
         };
@@ -326,25 +326,18 @@ mod tests {
 
         let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
-        // Run process_chapter
-        // We expect it to fail at synthesis step due to network, but generate SSML before that.
         let result = workflow.process_chapter(&chapter_path, filename).await;
         
-        // Assertions
-        // Expect error due to synthesis network fail (mock configured to fail)
         assert!(result.is_err(), "Expected synthesis failure due to mock error");
         
-        // Check LLM calls
-        assert_eq!(*call_count.lock().unwrap(), 2, "Should call LLM twice (Analysis + SSML)");
+        assert_eq!(*call_count.lock().unwrap(), 2, "Should call LLM twice (Analysis + Script)");
 
-        // Check SSML file existence
-        let ssml_path = build_dir.join("chapter_1_txt").join("SSML.json");
-        assert!(ssml_path.exists(), "SSML.json should be created");
+        let segments_path = build_dir.join("chapter_1_txt").join("segments.json");
+        assert!(segments_path.exists(), "segments.json should be created");
         
-        let content = fs::read_to_string(ssml_path)?;
-        assert!(content.contains("<speak>Test audio</speak>"));
+        let content = fs::read_to_string(segments_path)?;
+        assert!(content.contains("Test audio"));
         
-        // Cleanup
         let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
@@ -382,14 +375,17 @@ mod tests {
         let chapter_path = input_dir.join(filename);
         fs::write(&chapter_path, "Some story text.")?;
 
-        // Pre-populate SSML cache
         let chapter_build_dir = build_dir.join("chapter_2_txt");
         fs::create_dir_all(&chapter_build_dir)?;
-        let ssml_path = chapter_build_dir.join("SSML.json");
-        let cached_ssml = vec!["<speak>Cached audio</speak>".to_string()];
-        fs::write(&ssml_path, serde_json::to_string(&cached_ssml)?)?;
+        let segments_path = chapter_build_dir.join("segments.json");
+        
+        let cached_segments = vec![AudioSegment {
+            speaker: "Narrator".to_string(),
+            text: "Cached audio".to_string(),
+            style: None,
+        }];
+        fs::write(&segments_path, serde_json::to_string(&cached_segments)?)?;
 
-        // Pre-populate audio chunk to skip synthesis
         let chunk_path = chapter_build_dir.join("chunk_0000.mp3");
         fs::write(&chunk_path, b"fake mp3 data")?;
 
@@ -400,15 +396,12 @@ mod tests {
 
         let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
-        // Run process_chapter
         let result = workflow.process_chapter(&chapter_path, filename).await;
         
-        assert!(result.is_ok(), "Should complete successfully (skipping synthesis via cache)");
+        assert!(result.is_ok(), "Should complete successfully");
         
-        // Check LLM calls - Should be 0
         assert_eq!(*call_count.lock().unwrap(), 0, "Should use cache and NOT call LLM");
 
-        // Cleanup
         let _ = fs::remove_dir_all(test_root);
         Ok(())
     }

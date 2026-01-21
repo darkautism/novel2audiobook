@@ -1,0 +1,16 @@
+{
+  "voice_1": {
+    "ref_audio_path": "voices/voice1.wav",
+    "prompt_text": "Hello world",
+    "prompt_lang": "en",
+    "gender": "Male",
+    "tags": ["young", "energetic"]
+  },
+  "voice_2": {
+    "ref_audio_path": "voices/voice2.wav",
+    "prompt_text": "Testing system",
+    "prompt_lang": "zh",
+    "gender": "Female",
+    "tags": ["serious", "mature"]
+  }
+}

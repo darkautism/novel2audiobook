@@ -5,68 +5,103 @@ use inquire::Select;
 
 pub async fn run_setup(config: &mut Config) -> Result<()> {
     let mut needs_save = false;
+    let provider = config.audio.provider.clone();
 
-    // 1. Check if we need to select voices
-    if config.audio.narrator_voice.is_none() 
-        || config.audio.default_male_voice.is_none() 
-        || config.audio.default_female_voice.is_none() 
-    {
-        println!("Voice settings missing. Fetching available voices for language: {}...", config.audio.language);
-        
-        let tts = create_tts_client(config)?;
-        let voices = tts.list_voices().await?;
-        let filtered_voices: Vec<Voice> = voices.into_iter()
-            .filter(|v| v.locale.starts_with(&config.audio.language))
-            .collect();
+    // Initialize factory (async)
+    // For SoVITS, this loads the voice library.
+    let tts = create_tts_client(config).await?;
 
-        if filtered_voices.is_empty() {
-            return Err(anyhow!("No voices found for language: {}", config.audio.language));
-        }
-
-        let voice_options: Vec<String> = filtered_voices.iter()
-            .map(|v| format!("{} ({}) - {}", v.short_name, v.gender, v.friendly_name.as_deref().unwrap_or(&v.name)))
-            .collect();
-
-        // Helper to find short_name from selection
-        let find_short_name = |selection: &str| -> String {
-             let short_name = selection.split_whitespace().next().unwrap();
-             short_name.to_string()
-        };
-
-        if config.audio.narrator_voice.is_none() {
-             let selection = Select::new("Select Narrator Voice:", voice_options.clone())
-                .prompt()?;
-             config.audio.narrator_voice = Some(find_short_name(&selection));
-             needs_save = true;
-        }
-
-        if config.audio.default_male_voice.is_none() {
-             let male_options: Vec<String> = filtered_voices.iter()
-                .filter(|v| v.gender == "Male")
-                .map(|v| format!("{} ({}) - {}", v.short_name, v.gender, v.friendly_name.as_deref().unwrap_or(&v.name)))
-                .collect();
+    match provider.as_str() {
+        "edge-tts" => {
+            if config.audio.edge_tts.is_none() {
+                config.audio.edge_tts = Some(Default::default());
+            }
+            // We need to re-borrow config mutably after using it immutable in create_tts_client?
+            // create_tts_client took &Config.
+            // We have &mut Config.
+            // Rust should allow this if scopes are correct.
             
-             // Fallback to all if no male voices found (rare)
-             let options = if male_options.is_empty() { &voice_options } else { &male_options };
+            // Check if setup needed
+            let setup_needed = {
+                let cfg = config.audio.edge_tts.as_ref().unwrap();
+                cfg.narrator_voice.is_none() 
+                || cfg.default_male_voice.is_none() 
+                || cfg.default_female_voice.is_none()
+            };
 
-             let selection = Select::new("Select Default Male Voice:", options.clone())
-                .prompt()?;
-             config.audio.default_male_voice = Some(find_short_name(&selection));
-             needs_save = true;
-        }
+            if setup_needed {
+                println!("Fetching Edge-TTS voices...");
+                let voices = tts.list_voices().await?;
+                let lang = &config.audio.language;
+                let filtered_voices: Vec<Voice> = voices.into_iter()
+                    .filter(|v| v.locale.starts_with(lang))
+                    .collect();
 
-        if config.audio.default_female_voice.is_none() {
-             let female_options: Vec<String> = filtered_voices.iter()
-                .filter(|v| v.gender == "Female")
-                .map(|v| format!("{} ({}) - {}", v.short_name, v.gender, v.friendly_name.as_deref().unwrap_or(&v.name)))
-                .collect();
-            
-             let options = if female_options.is_empty() { &voice_options } else { &female_options };
+                if filtered_voices.is_empty() {
+                    return Err(anyhow!("No voices found for language: {}", lang));
+                }
 
-             let selection = Select::new("Select Default Female Voice:", options.clone())
-                .prompt()?;
-             config.audio.default_female_voice = Some(find_short_name(&selection));
-             needs_save = true;
+                let cfg = config.audio.edge_tts.as_mut().unwrap();
+
+                if cfg.narrator_voice.is_none() {
+                    cfg.narrator_voice = Some(select_voice("Select Narrator Voice:", &filtered_voices, |_| true)?);
+                    needs_save = true;
+                }
+                if cfg.default_male_voice.is_none() {
+                    cfg.default_male_voice = Some(select_voice("Select Default Male Voice:", &filtered_voices, |v| v.gender == "Male")?);
+                    needs_save = true;
+                }
+                if cfg.default_female_voice.is_none() {
+                    cfg.default_female_voice = Some(select_voice("Select Default Female Voice:", &filtered_voices, |v| v.gender == "Female")?);
+                    needs_save = true;
+                }
+            }
+        },
+        "sovits-offline" => {
+             if config.audio.sovits.is_none() {
+                 // Initialize with defaults if missing
+                 config.audio.sovits = Some(crate::config::SovitsConfig {
+                    base_url: "http://127.0.0.1:9880".to_string(),
+                    voice_map_path: "sovits_voices.json".to_string(),
+                    narrator_voice: None,
+                    default_male_voice: None,
+                    default_female_voice: None,
+                 });
+             }
+
+             let setup_needed = {
+                let cfg = config.audio.sovits.as_ref().unwrap();
+                cfg.narrator_voice.is_none() 
+                || cfg.default_male_voice.is_none() 
+                || cfg.default_female_voice.is_none()
+            };
+
+             if setup_needed {
+                 println!("Loading SoVITS voices from library...");
+                 let voices = tts.list_voices().await?;
+                 
+                 if voices.is_empty() {
+                     return Err(anyhow!("No SoVITS voices found. Check sovits_voices.json"));
+                 }
+
+                 let cfg = config.audio.sovits.as_mut().unwrap();
+
+                 if cfg.narrator_voice.is_none() {
+                     cfg.narrator_voice = Some(select_voice("Select Narrator Voice:", &voices, |_| true)?);
+                     needs_save = true;
+                 }
+                 if cfg.default_male_voice.is_none() {
+                     cfg.default_male_voice = Some(select_voice("Select Default Male Voice:", &voices, |v| v.gender.eq_ignore_ascii_case("Male"))?);
+                     needs_save = true;
+                 }
+                 if cfg.default_female_voice.is_none() {
+                     cfg.default_female_voice = Some(select_voice("Select Default Female Voice:", &voices, |v| v.gender.eq_ignore_ascii_case("Female"))?);
+                     needs_save = true;
+                 }
+             }
+        },
+        _ => {
+            println!("Setup not implemented for provider: {}", provider);
         }
     }
 
@@ -76,4 +111,22 @@ pub async fn run_setup(config: &mut Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn select_voice<F>(prompt: &str, voices: &[Voice], filter: F) -> Result<String> 
+where F: Fn(&Voice) -> bool
+{
+    let filtered: Vec<&Voice> = voices.iter().filter(|v| filter(v)).collect();
+    
+    // Fallback if filter leaves nothing (e.g. no Male voices found), show all
+    let options_source = if filtered.is_empty() { voices.iter().collect() } else { filtered };
+    
+    let options: Vec<String> = options_source.iter()
+        .map(|v| format!("{} ({}) - {}", v.short_name, v.gender, v.friendly_name.as_deref().unwrap_or(&v.name)))
+        .collect();
+
+    let selection = Select::new(prompt, options).prompt()?;
+    
+    let short_name = selection.split_whitespace().next().unwrap().to_string();
+    Ok(short_name)
 }

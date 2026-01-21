@@ -1,71 +1,67 @@
 use crate::config::Config;
 use crate::state::CharacterMap;
 use anyhow::{Result, Context};
+use serde::{Deserialize, Serialize};
 use serde_json;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AudioSegment {
+    pub text: String,
+    pub speaker: String,
+    #[serde(default)]
+    pub style: Option<String>,
+}
 
 pub trait ScriptGenerator: Send + Sync {
     fn get_system_prompt(&self) -> String;
     fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String>;
-    fn parse_response(&self, response: &str) -> Result<Vec<String>>;
+    fn parse_response(&self, response: &str) -> Result<Vec<AudioSegment>>;
 }
 
-pub struct SsmlScriptGenerator {
-    config: Config,
-}
+pub struct JsonScriptGenerator;
 
-impl SsmlScriptGenerator {
-    pub fn new(config: &Config) -> Self {
-        Self { config: config.clone() }
+impl JsonScriptGenerator {
+    pub fn new(_config: &Config) -> Self {
+        Self
     }
 }
 
-impl ScriptGenerator for SsmlScriptGenerator {
+impl ScriptGenerator for JsonScriptGenerator {
     fn get_system_prompt(&self) -> String {
-        "你是一個 SSML 生成器。請僅返回有效的 JSON。".to_string()
+        "你是一個有聲書腳本生成器。請將小說文本轉換為結構化的音頻腳本 JSON。".to_string()
     }
 
     fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String> {
         let characters_json = serde_json::to_string(&char_map.characters)?;
-        let ssml_prompt = format!(
-            "請將以下小說文本轉換為 Edge TTS 的 SSML。\
-            使用提供的角色映射進行語音分配。\
-            對於有 'voice_id' 的角色，請使用該語音。\
-            對於其他人，請使用性別來選擇通用語調（但在此處不選擇語音名稱，僅在需要時標記角色/性別，或者僅輸出文本片段）。\
-            \n\n\
-            實際上，為了簡單起見：\
-            輸出一個字符串的 JSON 列表。每個字符串都是一個有效的 SSML <speak> 塊。\
-            將文本分解為邏輯段落（段落或對話）。\
-            使用 <voice name='...'> 標籤。\
-            \n\
-            配置：\
-            默認男性語音：'{}'\n\
-            默認女性語音：'{}'\n\
-            旁白語音：'{}'\n\
+        let prompt = format!(
+            "請將以下小說文本分解為對話和旁白段落。\
+            根據提供的角色映射識別說話者。\
             \n\
             角色映射：{}\n\
             \n\
-            規則：\
-            1. 每個段落都使用 <voice name='...'>。\n\
-            2. 對於旁白，使用旁白語音。\n\
-            3. 對於對話，檢查說話者。如果在角色映射中且有 voice_id，則使用它。\n\
-               如果沒有 voice_id，根據性別使用默認男性/女性語音。\n\
-            4. 如果上下文建議，調整 <prosody> 以表達情感。\n\
-            5. 僅返回 JSON：[ \"<speak>...</speak>\", ... ] \
+            輸出格式（JSON 列表）：\n\
+            [\n\
+              {{ \"speaker\": \"角色名或'旁白'\", \"text\": \"文本內容\", \"style\": \"情感/語氣(可選)\" }},\n\
+              ...\n\
+            ]\n\
+            \n\
+            規則：\n\
+            1. 每個段落都必須是一個對象。\n\
+            2. 如果是旁白，speaker 填寫 '旁白'。\n\
+            3. 如果是對話，speaker 填寫角色名稱。\n\
+            4. 保持文本完整，不要遺漏。\n\
             \n\n文本：\n{}",
-            self.config.audio.default_male_voice.as_deref().unwrap_or(""),
-            self.config.audio.default_female_voice.as_deref().unwrap_or(""),
-            self.config.audio.narrator_voice.as_deref().unwrap_or(""),
             characters_json,
             text
         );
-        Ok(ssml_prompt)
+        Ok(prompt)
     }
 
-    fn parse_response(&self, response: &str) -> Result<Vec<String>> {
+    fn parse_response(&self, response: &str) -> Result<Vec<AudioSegment>> {
         let clean_json = strip_code_blocks(response);
-        let ssml_segments: Vec<String> = serde_json::from_str(&clean_json)
-            .context(format!("Failed to parse SSML JSON: {}", clean_json))?;
-        Ok(ssml_segments)
+        let segments: Vec<AudioSegment> = serde_json::from_str(&clean_json)
+            .context(format!("Failed to parse Script JSON: {}", clean_json))?;
+        Ok(segments)
     }
 }
 
@@ -83,14 +79,10 @@ impl ScriptGenerator for PlainScriptGenerator {
     }
 
     fn generate_prompt(&self, _text: &str, _char_map: &CharacterMap) -> Result<String> {
-        // TODO: Implement prompt generation for plain text/independent channel
-        // Placeholder for future implementation
         Ok("TODO: Implement prompt".to_string())
     }
 
-    fn parse_response(&self, _response: &str) -> Result<Vec<String>> {
-        // TODO: Implement parsing for plain text/independent channel
-        // Placeholder for future implementation
+    fn parse_response(&self, _response: &str) -> Result<Vec<AudioSegment>> {
         Ok(vec![])
     }
 }

@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::tts::TtsClient;
+use crate::tts::{TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL};
 use crate::state::{WorkflowState, CharacterMap, CharacterInfo};
 use crate::script::{ScriptGenerator, JsonScriptGenerator, PlainScriptGenerator, strip_code_blocks, AudioSegment};
 use anyhow::{Result, Context};
@@ -23,7 +23,43 @@ pub struct WorkflowManager {
 impl WorkflowManager {
     pub fn new(config: Config, llm: Box<dyn LlmClient>, tts: Box<dyn TtsClient>) -> Result<Self> {
         let state = Self::load_state(&config.build_folder)?;
-        let character_map = Self::load_character_map(&config.build_folder)?;
+        let mut character_map = Self::load_character_map(&config.build_folder)?;
+
+        // Ensure mob characters exist
+        let mut map_updated = false;
+        
+        if !character_map.characters.contains_key("路人(男)") {
+            character_map.characters.insert("路人(男)".to_string(), CharacterInfo {
+                gender: "Male".to_string(),
+                voice_id: Some(VOICE_ID_MOB_MALE.to_string()),
+                description: Some("一般男性路人".to_string()),
+            });
+            map_updated = true;
+        }
+        if !character_map.characters.contains_key("路人(女)") {
+            character_map.characters.insert("路人(女)".to_string(), CharacterInfo {
+                gender: "Female".to_string(),
+                voice_id: Some(VOICE_ID_MOB_FEMALE.to_string()),
+                description: Some("一般女性路人".to_string()),
+            });
+            map_updated = true;
+        }
+        if !character_map.characters.contains_key("路人") {
+            character_map.characters.insert("路人".to_string(), CharacterInfo {
+                gender: "Neutral".to_string(),
+                voice_id: Some(VOICE_ID_MOB_NEUTRAL.to_string()),
+                description: Some("一般路人".to_string()),
+            });
+            map_updated = true;
+        }
+
+        if map_updated {
+            let path = Path::new(&config.build_folder).join("character_map.json");
+            // Ensure build dir exists (it might not if it's the first run)
+            fs::create_dir_all(&config.build_folder)?;
+            let content = serde_json::to_string_pretty(&character_map)?;
+            fs::write(path, content)?;
+        }
         
         let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
             "edge-tts" | "sovits-offline" => Box::new(JsonScriptGenerator::new(&config)),
@@ -124,6 +160,7 @@ impl WorkflowManager {
             let analysis_prompt = format!(
                 "請分析以下文本。識別所有說話的角色。\
                 確定他們的性別（Male/Female）以及是否為主要角色（important）。\
+                系統已內建路人、路人(男)、路人(女)三個角色，請勿重複創建。\
                 僅返回一個 JSON 對象：\
                 {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\" }} ] }} \
                 \n\n文本：\n{}", 

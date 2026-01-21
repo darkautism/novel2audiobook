@@ -6,8 +6,13 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::Deserialize;
+use rand::seq::IndexedRandom; // For random selection
 
-// --- Constants based on Python Version (EdgeTTS) ---
+// --- Constants ---
+
+pub const VOICE_ID_MOB_MALE: &str = "placeholder_mob_male";
+pub const VOICE_ID_MOB_FEMALE: &str = "placeholder_mob_female";
+pub const VOICE_ID_MOB_NEUTRAL: &str = "placeholder_mob_neutral";
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const CHROMIUM_MAJOR_VERSION: &str = "143";
@@ -45,7 +50,7 @@ pub trait TtsClient: Send + Sync {
 
 pub async fn create_tts_client(config: &Config) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
-        "edge-tts" => Ok(Box::new(EdgeTtsClient::new(config))),
+        "edge-tts" => Ok(Box::new(EdgeTtsClient::new(config).await?)),
         "sovits-offline" => Ok(Box::new(SovitsTtsClient::new(config).await?)),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
@@ -85,11 +90,48 @@ async fn list_voices_http() -> Result<Vec<Voice>> {
 
 pub struct EdgeTtsClient {
     config: Config,
+    voices_cache: Vec<Voice>,
 }
 
 impl EdgeTtsClient {
-    pub fn new(config: &Config) -> Self {
-        Self { config: config.clone() }
+    pub async fn new(config: &Config) -> Result<Self> {
+        // Pre-fetch voices for caching
+        let voices_cache = list_voices_http().await.unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to fetch EdgeTTS voices for random selection: {}", e);
+            Vec::new()
+        });
+        Ok(Self { config: config.clone(), voices_cache })
+    }
+
+    #[cfg(test)]
+    pub fn new_with_voices(config: &Config, voices: Vec<Voice>) -> Self {
+        Self { config: config.clone(), voices_cache: voices }
+    }
+
+    fn pick_random_voice(&self, gender: Option<&str>) -> String {
+        let lang_prefix = &self.config.audio.language;
+        let mut rng = rand::rng(); 
+
+        let candidates: Vec<&Voice> = self.voices_cache.iter().filter(|v| {
+            if !v.locale.starts_with(lang_prefix) {
+                return false;
+            }
+            if let Some(g) = gender {
+                if !v.gender.eq_ignore_ascii_case(g) {
+                    return false;
+                }
+            }
+            true
+        }).collect();
+
+        if let Some(v) = candidates.choose(&mut rng) {
+            v.short_name.clone()
+        } else {
+             // Fallback
+             self.config.audio.edge_tts.as_ref()
+                .and_then(|c| c.narrator_voice.clone())
+                .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
+        }
     }
 
     fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap) -> String {
@@ -107,7 +149,13 @@ impl EdgeTtsClient {
         // 2. Check Character Map
         if let Some(info) = char_map.characters.get(speaker) {
             if let Some(voice_id) = &info.voice_id {
-                return voice_id.clone();
+                // Check for Special Mob IDs
+                match voice_id.as_str() {
+                    VOICE_ID_MOB_MALE => return self.pick_random_voice(Some("Male")),
+                    VOICE_ID_MOB_FEMALE => return self.pick_random_voice(Some("Female")),
+                    VOICE_ID_MOB_NEUTRAL => return self.pick_random_voice(None),
+                    _ => return voice_id.clone(),
+                }
             }
             
             // 3. Fallback to Gender Default
@@ -136,7 +184,12 @@ impl EdgeTtsClient {
 #[async_trait]
 impl TtsClient for EdgeTtsClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
-        list_voices_http().await
+        // Return cached voices if available, or fetch
+        if !self.voices_cache.is_empty() {
+            Ok(self.voices_cache.clone())
+        } else {
+            list_voices_http().await
+        }
     }
 
     async fn synthesize(&self, segment: &AudioSegment, char_map: &CharacterMap) -> Result<Vec<u8>> {
@@ -171,6 +224,25 @@ impl SovitsTtsClient {
         Ok(Self { config: config.clone(), voice_library: library })
     }
 
+    fn pick_random_voice(&self, gender: Option<&str>) -> Option<String> {
+        let mut rng = rand::rng();
+        // Sovits voices usually don't have Locale metadata in the struct provided in context 
+        // (impl just shows gender/prompt_lang). 
+        // We will assume all loaded Sovits voices are valid for the configured language or just ignore locale for Sovits 
+        // as Sovits is usually specific.
+        
+        let candidates: Vec<&String> = self.voice_library.iter().filter_map(|(id, def)| {
+             if let Some(g) = gender {
+                 if !def.gender.eq_ignore_ascii_case(g) {
+                     return None;
+                 }
+             }
+             Some(id)
+        }).collect();
+
+        candidates.choose(&mut rng).map(|s| s.to_string())
+    }
+
     fn resolve_voice(&self, speaker: &str, char_map: &CharacterMap) -> Option<String> {
         let sovits_config = self.config.audio.sovits.as_ref()?;
         
@@ -182,7 +254,20 @@ impl SovitsTtsClient {
         // 2. Character Map
         if let Some(info) = char_map.characters.get(speaker) {
             if let Some(voice_id) = &info.voice_id {
-                return Some(voice_id.clone());
+                // Check for Special Mob IDs
+                 match voice_id.as_str() {
+                     VOICE_ID_MOB_MALE => {
+                         if let Some(v) = self.pick_random_voice(Some("Male")) { return Some(v); }
+                     },
+                     VOICE_ID_MOB_FEMALE => {
+                         if let Some(v) = self.pick_random_voice(Some("Female")) { return Some(v); }
+                     },
+                     VOICE_ID_MOB_NEUTRAL => {
+                         if let Some(v) = self.pick_random_voice(None) { return Some(v); }
+                     },
+                     _ => return Some(voice_id.clone()),
+                 }
+                 // If random failed (no voices), fall through to default
             }
 
              // 3. Fallback to Gender Default
@@ -228,14 +313,13 @@ impl TtsClient for SovitsTtsClient {
         let url = format!("{}/tts", base_url.trim_end_matches('/'));
 
         // Construct Body
-        // Note: The user provided a specific JSON structure.
         let body = serde_json::json!({
             "text": segment.text,
-            "text_lang": "zh", // Assumption: Input text is Chinese as per context (novel translation)
+            "text_lang": "zh",
             "ref_audio_path": voice_def.ref_audio_path,
             "prompt_text": voice_def.prompt_text,
             "prompt_lang": voice_def.prompt_lang,
-            "text_split_method": "cut5", // As per GET example, or use sensible default
+            "text_split_method": "cut5", 
             "batch_size": 1,
             "media_type": "wav",
             "streaming_mode": false,
@@ -256,5 +340,62 @@ impl TtsClient for SovitsTtsClient {
 
         let audio_data = resp.bytes().await?.to_vec();
         Ok(audio_data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AudioConfig, EdgeTtsConfig};
+
+    #[test]
+    fn test_pick_random_voice() {
+        let config = Config {
+            input_folder: "".to_string(),
+            output_folder: "".to_string(),
+            build_folder: "".to_string(),
+            llm: crate::config::LlmConfig {
+                provider: "mock".to_string(),
+                gemini: None,
+                ollama: None,
+                openai: None,
+            },
+            audio: AudioConfig {
+                provider: "edge-tts".to_string(),
+                language: "zh".to_string(),
+                edge_tts: Some(EdgeTtsConfig {
+                   narrator_voice: Some("Narrator".to_string()),
+                   ..Default::default()
+                }),
+                ..Default::default()
+            },
+        };
+        
+        let voices = vec![
+            Voice { short_name: "zh-CN-Male".to_string(), gender: "Male".to_string(), locale: "zh-CN".to_string(), name: "".to_string(), friendly_name: None },
+            Voice { short_name: "zh-TW-Female".to_string(), gender: "Female".to_string(), locale: "zh-TW".to_string(), name: "".to_string(), friendly_name: None },
+            Voice { short_name: "en-US-Male".to_string(), gender: "Male".to_string(), locale: "en-US".to_string(), name: "".to_string(), friendly_name: None },
+        ];
+        
+        let client = EdgeTtsClient::new_with_voices(&config, voices);
+        
+        // Test filtering
+        let v = client.pick_random_voice(Some("Male"));
+        assert_eq!(v, "zh-CN-Male"); // Only one zh Male
+        
+        let v = client.pick_random_voice(Some("Female"));
+        assert_eq!(v, "zh-TW-Female");
+        
+        // Test Neutral (should pick either zh-CN-Male or zh-TW-Female)
+        let v = client.pick_random_voice(None);
+        assert!(v == "zh-CN-Male" || v == "zh-TW-Female");
+        
+        // Test Language mismatch
+        // If I change config language to "en"
+        let mut config_en = config.clone();
+        config_en.audio.language = "en".to_string();
+        let client_en = EdgeTtsClient::new_with_voices(&config_en, client.voices_cache.clone());
+        let v = client_en.pick_random_voice(Some("Male"));
+        assert_eq!(v, "en-US-Male");
     }
 }

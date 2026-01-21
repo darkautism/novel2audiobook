@@ -50,6 +50,7 @@ impl ScriptGenerator for JsonScriptGenerator {
             2. 如果是旁白，speaker 填寫 '旁白'。\n\
             3. 如果是對話，speaker 填寫角色名稱。\n\
             4. 保持文本完整，不要遺漏。\n\
+            5. 對於不重要的路人角色，請根據性別使用 '路人(男)', '路人(女)' 或 '路人' 作為 speaker。\n\
             \n\n文本：\n{}",
             characters_json,
             text

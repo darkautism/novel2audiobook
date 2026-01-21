@@ -14,6 +14,9 @@ pub struct Config {
     #[serde(default = "default_build")]
     pub build_folder: String,
 
+    #[serde(default)]
+    pub unattended: bool,
+
     pub llm: LlmConfig,
 
     #[serde(default)]

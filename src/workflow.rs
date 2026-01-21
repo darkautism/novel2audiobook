@@ -123,8 +123,9 @@ impl WorkflowManager {
         }
         
         entries.sort();
+        let total_chapters = entries.len();
 
-        for path in entries {
+        for (i, path) in entries.iter().enumerate() {
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
             
             if self.state.completed_chapters.contains(&filename) {
@@ -133,10 +134,28 @@ impl WorkflowManager {
             }
 
             println!("Processing chapter: {}", filename);
-            self.process_chapter(&path, &filename).await?;
+            self.process_chapter(path, &filename).await?;
             
             self.state.completed_chapters.push(filename);
             self.save_state()?;
+
+            if !self.config.unattended && i < total_chapters - 1 {
+                let ans = inquire::Confirm::new("Continue to next chapter?")
+                    .with_default(true)
+                    .prompt();
+                
+                match ans {
+                    Ok(true) => {},
+                    Ok(false) => {
+                        println!("Stopping as requested.");
+                        break;
+                    },
+                    Err(_) => {
+                        println!("Error reading input, stopping.");
+                        break;
+                    }
+                }
+            }
         }
 
         println!("All chapters processed!");
@@ -157,13 +176,45 @@ impl WorkflowManager {
         } else {
             // 1. Analyze Characters
             println!("Analyzing characters...");
+
+            let existing_chars_str = self.character_map.characters.keys()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+                
+            let mut voices = self.tts.list_voices().await.unwrap_or_default();
+            // Filter voices by language
+            voices.retain(|v| v.locale.starts_with(&self.config.audio.language));
+            
+            let voice_list_str = voices.iter()
+                .map(|v| format!("{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}", v.short_name, v.gender, v.locale))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let narrator_voice_id = match self.config.audio.provider.as_str() {
+                "edge-tts" => self.config.audio.edge_tts.as_ref().and_then(|c| c.narrator_voice.clone()),
+                "sovits-offline" => self.config.audio.sovits.as_ref().and_then(|c| c.narrator_voice.clone()),
+                _ => None,
+            }.unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+
             let analysis_prompt = format!(
                 "請分析以下文本。識別所有說話的角色。\
-                確定他們的性別（Male/Female）以及是否為主要角色（important）。\
-                系統已內建路人、路人(男)、路人(女)三個角色，請勿重複創建。\
-                僅返回一個 JSON 對象：\
-                {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\" }} ] }} \
+                \n\n上下文資訊 (Context):\
+                \n1. 目前已存在的角色 (Existing Characters): [{}]\
+                \n2. 旁白聲音 ID (Narrator Voice ID): \"{}\"\
+                \n3. 可用聲音列表 (Available Voices):\n[{}]\
+                \n\n指令 (Instructions):\
+                \n- 識別文本中的說話角色，確定性別（Male/Female）及是否為主要角色。\
+                \n- 若角色已存在於「目前已存在的角色」中，請使用相同的名稱。\
+                \n- 若文本為第一人稱（如「我」），請識別主角，並將其 voice_id 設定為旁白聲音 ID。\
+                \n- 對於新角色，你可以從「可用聲音列表」中選擇合適的 voice_id (選填)，否則留空。\
+                \n- 系統已內建路人、路人(男)、路人(女)三個角色，請勿重複創建。\
+                \n\n請僅返回一個 JSON 對象：\
+                {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
                 \n\n文本：\n{}", 
+                existing_chars_str,
+                narrator_voice_id,
+                voice_list_str,
                 text.chars().take(10000).collect::<String>() // Limit context if needed, but ideally full chapter.
             );
 
@@ -184,6 +235,8 @@ impl WorkflowManager {
                 _important: bool,
                 #[serde(default)]
                 description: Option<String>,
+                #[serde(default)]
+                voice_id: Option<String>,
             }
             
             // Clean markdown code blocks if present
@@ -194,13 +247,22 @@ impl WorkflowManager {
             // Update Character Map
             let mut updated_map = false;
             for char in analysis.characters {
-                if !self.character_map.characters.contains_key(&char.name) {
-                    self.character_map.characters.insert(char.name.clone(), CharacterInfo {
-                        gender: char.gender,
-                        voice_id: None, 
-                        description: char.description,
-                    });
-                    updated_map = true;
+                let entry = self.character_map.characters.entry(char.name.clone());
+                match entry {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(CharacterInfo {
+                            gender: char.gender,
+                            voice_id: char.voice_id, 
+                            description: char.description,
+                        });
+                        updated_map = true;
+                    },
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        if e.get().voice_id.is_none() && char.voice_id.is_some() {
+                             e.get_mut().voice_id = char.voice_id;
+                             updated_map = true;
+                        }
+                    }
                 }
             }
             if updated_map {
@@ -340,6 +402,7 @@ mod tests {
             input_folder: input_dir.to_string_lossy().to_string(),
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
+            unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
                 gemini: None,
@@ -396,6 +459,7 @@ mod tests {
             input_folder: input_dir.to_string_lossy().to_string(),
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
+            unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
                 gemini: None,

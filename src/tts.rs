@@ -354,6 +354,7 @@ mod tests {
             input_folder: "".to_string(),
             output_folder: "".to_string(),
             build_folder: "".to_string(),
+            unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
                 gemini: None,

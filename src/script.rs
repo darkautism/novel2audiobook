@@ -47,7 +47,7 @@ impl ScriptGenerator for JsonScriptGenerator {
             \n\
             規則：\n\
             1. 每個段落都必須是一個對象。\n\
-            2. 如果是旁白，speaker 填寫 '旁白'。\n\
+            2. 如果是旁白，speaker 填寫 '旁白'。旁白應要根據前後文有語氣抑揚頓挫，避免死念書。\n\
             3. 如果是對話，speaker 填寫角色名稱。\n\
             4. 保持文本完整，不要遺漏。\n\
             5. 對於不重要的路人角色，請根據性別使用 '路人(男)', '路人(女)' 或 '路人' 作為 speaker。\n\

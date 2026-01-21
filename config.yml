@@ -1,27 +1,31 @@
 input_folder: ./input_chapters
 output_folder: ./output_audio
 build_folder: ./build
+unattended: false
 llm:
-  provider: gemini # options: gemini, ollama, openai
+  provider: gemini
   gemini:
     api_key: YourAPIKEY
     model: gemini-3-flash-preview
   ollama:
     base_url: http://localhost:11434
     model: llama3:latest
- # OpenAI configuration example
   openai:
     api_key: sk-...
     model: gpt-4o
-    base_url: https://api.openai.com/v1 # Optional, default is https://api.openai.com/v1
+    base_url: https://api.openai.com/v1
 audio:
   provider: edge-tts
   language: zh
-  exclude_locales: ['zh-HK'] # HK翻譯中文品質不好，暫時排除
+  exclude_locales:
+  - zh-HK
   edge-tts:
-    narrator_voice: zh-TW-HsiaoChenNeural
+    narrator_voice: zh-CN-XiaoxiaoNeural
     default_male_voice: zh-TW-YunJheNeural
     default_female_voice: zh-TW-HsiaoYuNeural
   sovits-offline:
     base_url: http://127.0.0.1:9880
     voice_map_path: sovits_voices.json
+    narrator_voice: null
+    default_male_voice: null
+    default_female_voice: null

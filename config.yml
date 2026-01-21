@@ -23,6 +23,8 @@ audio:
     narrator_voice: zh-CN-XiaoxiaoNeural
     default_male_voice: zh-TW-YunJheNeural
     default_female_voice: zh-TW-HsiaoYuNeural
+    # edge-tts disable all of style. If you want to enable it, you should using azure tts, it is paid version.
+    style: false
   sovits-offline:
     base_url: http://127.0.0.1:9880
     voice_map_path: sovits_voices.json

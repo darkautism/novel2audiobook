@@ -72,6 +72,8 @@ pub struct EdgeTtsConfig {
     pub narrator_voice: Option<String>,
     pub default_male_voice: Option<String>,
     pub default_female_voice: Option<String>,
+    #[serde(default)]
+    pub style : bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

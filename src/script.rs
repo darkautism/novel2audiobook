@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::state::CharacterMap;
-use anyhow::{Result, Context};
+use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -16,6 +16,7 @@ pub trait ScriptGenerator: Send + Sync {
     fn get_system_prompt(&self) -> String;
     fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String>;
     fn parse_response(&self, response: &str) -> Result<Vec<AudioSegment>>;
+    fn support_style(&self) -> Vec<String>;
 }
 
 pub struct JsonScriptGenerator;
@@ -33,6 +34,7 @@ impl ScriptGenerator for JsonScriptGenerator {
 
     fn generate_prompt(&self, text: &str, char_map: &CharacterMap) -> Result<String> {
         let characters_json = serde_json::to_string(&char_map.characters)?;
+        let supported_styles = self.support_style();
         let prompt = format!(
             "請將以下小說文本分解為對話和旁白段落。\
             根據提供的角色映射識別說話者。\
@@ -45,6 +47,7 @@ impl ScriptGenerator for JsonScriptGenerator {
               ...\n\
             ]\n\
             \n\
+            支援的情緒：{}\n\
             規則：\n\
             1. 每個段落都必須是一個對象。\n\
             2. 如果是旁白，speaker 填寫 '旁白'。旁白應要根據前後文有語氣抑揚頓挫，避免死念書。\n\
@@ -53,6 +56,7 @@ impl ScriptGenerator for JsonScriptGenerator {
             5. 對於不重要的路人角色，請根據性別使用 '路人(男)', '路人(女)' 或 '路人' 作為 speaker。\n\
             \n\n文本：\n{}",
             characters_json,
+            supported_styles.join(", "),
             text
         );
         Ok(prompt)
@@ -63,6 +67,10 @@ impl ScriptGenerator for JsonScriptGenerator {
         let segments: Vec<AudioSegment> = serde_json::from_str(&clean_json)
             .context(format!("Failed to parse Script JSON: {}", clean_json))?;
         Ok(segments)
+    }
+    
+    fn support_style(&self) -> Vec<String> {
+        ["cheerful", "sad", "angry", "affectionate", "newscast", "assistant", "lyrical", "calm", "fearful", "whispering"].map(String::from).to_vec()
     }
 }
 
@@ -85,6 +93,10 @@ impl ScriptGenerator for PlainScriptGenerator {
 
     fn parse_response(&self, _response: &str) -> Result<Vec<AudioSegment>> {
         Ok(vec![])
+    }
+    
+    fn support_style(&self) -> Vec<String> {
+        todo!()
     }
 }
 

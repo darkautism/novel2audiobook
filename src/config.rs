@@ -26,6 +26,10 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmConfig {
     pub provider: String, // "gemini", "ollama" or "openai"
+    #[serde(default = "default_retry_count")]
+    pub retry_count: usize,
+    #[serde(default = "default_retry_delay")]
+    pub retry_delay_seconds: u64,
     pub gemini: Option<GeminiConfig>,
     pub ollama: Option<OllamaConfig>,
     pub openai: Option<OpenAIConfig>,
@@ -124,6 +128,8 @@ fn default_output() -> String { "output".to_string() }
 fn default_build() -> String { "build".to_string() }
 fn default_language() -> String { "zh".to_string() }
 fn default_exclude_locales() -> Vec<String> { vec![] }
+fn default_retry_count() -> usize { 3 }
+fn default_retry_delay() -> u64 { 10 }
 fn default_tts_provider() -> String { "edge-tts".to_string() }
 fn default_sovits_base_url() -> String { "http://127.0.0.1:9880".to_string() }
 fn default_sovits_voice_map() -> String { "sovits_voices.json".to_string() }

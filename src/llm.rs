@@ -11,20 +11,59 @@ pub trait LlmClient: Send + Sync + Debug {
 }
 
 pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
-    match config.llm.provider.as_str() {
+    let client: Box<dyn LlmClient> = match config.llm.provider.as_str() {
         "gemini" => {
             let cfg = config.llm.gemini.as_ref().context("Gemini config missing")?;
-            Ok(Box::new(GeminiClient::new(&cfg.api_key, &cfg.model)))
+            Box::new(GeminiClient::new(&cfg.api_key, &cfg.model))
         },
         "ollama" => {
             let cfg = config.llm.ollama.as_ref().context("Ollama config missing")?;
-            Ok(Box::new(OllamaClient::new(&cfg.base_url, &cfg.model)))
+            Box::new(OllamaClient::new(&cfg.base_url, &cfg.model))
         },
         "openai" => {
             let cfg = config.llm.openai.as_ref().context("OpenAI config missing")?;
-            Ok(Box::new(OpenAIClient::new(&cfg.api_key, &cfg.model, cfg.base_url.as_deref())))
+            Box::new(OpenAIClient::new(&cfg.api_key, &cfg.model, cfg.base_url.as_deref()))
         },
-        _ => Err(anyhow!("Unknown LLM provider: {}", config.llm.provider))
+        _ => return Err(anyhow!("Unknown LLM provider: {}", config.llm.provider))
+    };
+
+    Ok(Box::new(RetryLlmClient {
+        inner: client,
+        retry_count: config.llm.retry_count,
+        retry_delay_seconds: config.llm.retry_delay_seconds,
+    }))
+}
+
+#[derive(Debug)]
+struct RetryLlmClient {
+    inner: Box<dyn LlmClient>,
+    retry_count: usize,
+    retry_delay_seconds: u64,
+}
+
+#[async_trait]
+impl LlmClient for RetryLlmClient {
+    async fn chat(&self, system: &str, user: &str) -> Result<String> {
+        let mut attempt = 0;
+        loop {
+            match self.inner.chat(system, user).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("FATAL:") {
+                        return Err(e);
+                    }
+                    
+                    if attempt >= self.retry_count {
+                         return Err(e);
+                    }
+                    
+                    println!("wait {} sec retry", self.retry_delay_seconds);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(self.retry_delay_seconds)).await;
+                    attempt += 1;
+                }
+            }
+        }
     }
 }
 
@@ -122,8 +161,12 @@ impl LlmClient for GeminiClient {
             .await?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let error_text = resp.text().await?;
-            return Err(anyhow!("Gemini API error: {}", error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+                return Err(anyhow!("FATAL: Gemini API error: {} - {}", status, error_text));
+            }
+            return Err(anyhow!("Gemini API error: {} - {}", status, error_text));
         }
 
         // Get text to debug JSON issues if needed
@@ -216,8 +259,12 @@ impl LlmClient for OllamaClient {
             .await?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let error_text = resp.text().await?;
-            return Err(anyhow!("Ollama API error: {}", error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+                return Err(anyhow!("FATAL: Ollama API error: {} - {}", status, error_text));
+            }
+            return Err(anyhow!("Ollama API error: {} - {}", status, error_text));
         }
 
         let result: OllamaResponse = resp.json().await?;
@@ -293,8 +340,12 @@ impl LlmClient for OpenAIClient {
             .await?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
             let error_text = resp.text().await?;
-            return Err(anyhow!("OpenAI API error: {}", error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+                return Err(anyhow!("FATAL: OpenAI API error: {} - {}", status, error_text));
+            }
+            return Err(anyhow!("OpenAI API error: {} - {}", status, error_text));
         }
 
         let result: OpenAIResponse = resp.json().await?;
@@ -311,6 +362,77 @@ impl LlmClient for OpenAIClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug)]
+    struct MockFailingClient {
+        failures: Arc<Mutex<usize>>,
+        fatal: bool,
+    }
+
+    #[async_trait]
+    impl LlmClient for MockFailingClient {
+        async fn chat(&self, _system: &str, _user: &str) -> Result<String> {
+            let mut count = self.failures.lock().unwrap();
+            if *count > 0 {
+                *count -= 1;
+                if self.fatal {
+                    return Err(anyhow!("FATAL: mocked error"));
+                } else {
+                    return Err(anyhow!("Transient error"));
+                }
+            }
+            Ok("Success".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_transient_success() {
+        let failures = Arc::new(Mutex::new(2));
+        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: false });
+        let client = RetryLlmClient {
+            inner,
+            retry_count: 3,
+            retry_delay_seconds: 0, 
+        };
+
+        let result = client.chat("sys", "user").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Success");
+        assert_eq!(*failures.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_retry_exhaustion() {
+        let failures = Arc::new(Mutex::new(5));
+        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: false });
+        let client = RetryLlmClient {
+            inner,
+            retry_count: 2,
+            retry_delay_seconds: 0,
+        };
+
+        let result = client.chat("sys", "user").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Transient error");
+        assert_eq!(*failures.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_fatal_no_retry() {
+        let failures = Arc::new(Mutex::new(5));
+        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: true });
+        let client = RetryLlmClient {
+            inner,
+            retry_count: 3,
+            retry_delay_seconds: 0,
+        };
+
+        let result = client.chat("sys", "user").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("FATAL"));
+        assert_eq!(*failures.lock().unwrap(), 4);
+    }
 
     #[test]
     fn test_gemini_response_parsing_safety_block() {

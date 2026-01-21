@@ -146,13 +146,7 @@ impl TtsClient for AcgnaiClient {
 
     async fn get_voice_styles(&self, voice_id: &str) -> Result<Vec<String>> {
          if let Some(meta) = self.metadata.get(voice_id) {
-             let mut styles = Vec::new();
-             for s_list in meta.supported_styles.values() {
-                 styles.extend(s_list.clone());
-             }
-             styles.sort();
-             styles.dedup();
-             Ok(styles)
+             Ok(meta.emotion.clone())
          } else {
              Ok(Vec::new())
          }

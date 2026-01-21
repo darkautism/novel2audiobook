@@ -10,7 +10,7 @@ use tokio::fs;
 pub struct AcgnaiVoiceMetadata {
     pub gender: String, // "Male", "Female", "Neutral"
     pub tags: Vec<String>,
-    pub supported_styles: HashMap<String, Vec<String>>, // Lang -> Emotions
+    pub emotion: Vec<String>,
 }
 
 // Map from Model Name -> Metadata
@@ -112,7 +112,7 @@ pub async fn load_or_refresh_metadata(
                                             AcgnaiVoiceMetadata {
                                                 gender: info.gender,
                                                 tags: info.tags,
-                                                supported_styles: langs.clone(),
+                                                emotion: langs.values().cloned().flatten().collect(),
                                             },
                                         );
                                     }
@@ -135,7 +135,7 @@ pub async fn load_or_refresh_metadata(
                         AcgnaiVoiceMetadata {
                             gender: "Female".to_string(),
                             tags: vec![],
-                            supported_styles: langs.clone(),
+                            emotion: langs.values().cloned().flatten().collect(),
                         },
                     );
                 }

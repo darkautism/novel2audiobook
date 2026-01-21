@@ -84,6 +84,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,

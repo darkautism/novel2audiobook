@@ -418,6 +418,7 @@ mod tests {
     }
 
     // Mock LLM Client
+    #[derive(Debug)]
     struct MockLlmClient {
         call_count: Arc<Mutex<usize>>,
     }
@@ -487,6 +488,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,
@@ -544,6 +547,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,
@@ -606,6 +611,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,
@@ -671,6 +678,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,
@@ -688,6 +697,7 @@ mod tests {
         fs::write(&chapter_path, "Text")?;
 
         // Setup Mock LLM to capture prompt
+        #[derive(Debug)]
         struct CapturingLlmClient {
             prompts: Arc<Mutex<Vec<String>>>,
         }
@@ -752,6 +762,8 @@ mod tests {
             unattended: false,
             llm: crate::config::LlmConfig {
                 provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
                 gemini: None,
                 ollama: None,
                 openai: None,
@@ -770,6 +782,7 @@ mod tests {
         fs::write(input_dir.join(filename), "Text")?;
 
         // Mock LLM: Returns Protag
+        #[derive(Debug)]
         struct ProtagLlm;
         #[async_trait]
         impl LlmClient for ProtagLlm {

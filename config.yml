@@ -4,6 +4,8 @@ build_folder: ./build
 unattended: false
 llm:
   provider: gemini
+  retry_count: 3
+  retry_delay_seconds: 10
   gemini:
     api_key: YourAPIKEY
     model: gemini-3-flash-preview
@@ -40,6 +42,6 @@ audio:
     temperature: 1.0
     speed_factor: 1.0
     repetition_penalty: 1.35
-    narrator_voice: 星穹铁道-中文-阿兰_ZH
-    default_male_voice: 星穹铁道-中文-符玄_ZH
-    default_female_voice: 蔚蓝档案-中文-莲华
+    narrator_voice: 星穹铁道-中文-云璃_ZH
+    default_male_voice: 星穹铁道-中文-砂金_ZH
+    default_female_voice: 原神-中文-香菱_ZH

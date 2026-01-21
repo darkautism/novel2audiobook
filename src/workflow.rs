@@ -210,8 +210,11 @@ impl WorkflowManager {
                 \n- 識別文本中的說話角色，確定性別（Male/Female）及是否為主要角色。\
                 \n- 若角色已存在於「目前已存在的角色」中，請使用相同的名稱。\
                 \n- 若文本為第一人稱（如「我」），請識別主角，並將其 voice_id 設定為旁白聲音 ID。\
+                \n- 主要角色，尤其主角，請避免重複使用該聲音。旁白亦同。\
                 \n- 對於新角色，你可以從「可用聲音列表」中選擇合適的 voice_id (選填)，否則留空。\
                 \n- 系統已內建路人、路人(男)、路人(女)三個角色，請勿重複創建。\
+                \n- 不重要的丟棄式角色請直接使用路人。\
+                \n- 創建的JSON對象由於是key必須使用繁體中文。使用簡體將導致程式出錯。\
                 \n\n請僅返回一個 JSON 對象：\
                 {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
                 \n\n文本：\n{}", 
@@ -309,10 +312,8 @@ impl WorkflowManager {
 
         // 4. Merge
         println!("Merging audio...");
-        // Requirement 3: "output folder(cfg), contents is chapter_*** of the folder"
-        let output_chapter_dir = Path::new(&self.config.output_folder).join(filename.replace(".", "_"));
-        fs::create_dir_all(&output_chapter_dir)?;
-        let final_audio_path = output_chapter_dir.join("audio.mp3");
+        let output_filename = Path::new(filename).with_extension("mp3").file_name().unwrap().to_string_lossy().to_string();
+        let final_audio_path = Path::new(&self.config.output_folder).join(output_filename);
 
         let mut final_file = fs::File::create(&final_audio_path)?;
         for path in audio_files {
@@ -441,6 +442,68 @@ mod tests {
         let content = fs::read_to_string(segments_path)?;
         assert!(content.contains("Test audio"));
         
+        let _ = fs::remove_dir_all(test_root);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_flattened_output_structure() -> Result<()> {
+        let test_root = Path::new("test_output_flattened");
+        if test_root.exists() { fs::remove_dir_all(test_root)?; }
+        
+        let build_dir = test_root.join("build");
+        let input_dir = test_root.join("input");
+        let output_dir = test_root.join("output");
+        
+        fs::create_dir_all(&build_dir)?;
+        fs::create_dir_all(&input_dir)?;
+        fs::create_dir_all(&output_dir)?;
+
+        let config = Config {
+            input_folder: input_dir.to_string_lossy().to_string(),
+            output_folder: output_dir.to_string_lossy().to_string(),
+            build_folder: build_dir.to_string_lossy().to_string(),
+            unattended: false,
+            llm: crate::config::LlmConfig {
+                provider: "mock".to_string(),
+                gemini: None,
+                ollama: None,
+                openai: None,
+            },
+            audio: crate::config::AudioConfig {
+                provider: "edge-tts".to_string(),
+                ..crate::config::AudioConfig::default()
+            },
+        };
+
+        let filename = "chapter_flat.txt";
+        let chapter_path = input_dir.join(filename);
+        fs::write(&chapter_path, "Text")?;
+
+        // Pre-populate segments to skip LLM
+        let chapter_build_dir = build_dir.join("chapter_flat_txt");
+        fs::create_dir_all(&chapter_build_dir)?;
+        let segments_path = chapter_build_dir.join("segments.json");
+        let cached_segments = vec![AudioSegment {
+            speaker: "Narrator".to_string(),
+            text: "Audio".to_string(),
+            style: None,
+        }];
+        fs::write(&segments_path, serde_json::to_string(&cached_segments)?)?;
+        
+        let mock_llm = Box::new(MockLlmClient::new());
+        let mock_tts = Box::new(MockTtsClient { should_fail: false });
+
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
+        workflow.process_chapter(&chapter_path, filename).await?;
+
+        // Check output
+        let output_file = output_dir.join("chapter_flat.mp3");
+        assert!(output_file.exists(), "Output file should exist at root of output folder");
+        
+        let sub_dir = output_dir.join("chapter_flat_txt");
+        assert!(!sub_dir.exists(), "Subdirectory should NOT exist in output folder");
+
         let _ = fs::remove_dir_all(test_root);
         Ok(())
     }

@@ -1,12 +1,12 @@
+mod acgnai;
 mod config;
 mod llm;
-mod tts;
-mod setup;
-mod workflow;
-mod state;
 mod script;
+mod setup;
 mod sovits;
-mod acgnai;
+mod state;
+mod tts;
+mod workflow;
 
 use anyhow::Result;
 use config::Config;
@@ -15,7 +15,7 @@ use workflow::WorkflowManager;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    
+
     // 1. Load or Create Config
     // If load fails, we should check if it's because it doesn't exist.
     // If it doesn't exist, we can't do much without API keys.
@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     // 3. Interactive Setup (Voice Selection)
     setup::run_setup(&mut config, Some(&llm)).await?;
-    
+
     // 4. Initialize TTS
     let tts = tts::create_tts_client(&config, Some(&llm)).await?;
 

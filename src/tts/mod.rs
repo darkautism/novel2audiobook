@@ -43,16 +43,25 @@ pub trait TtsClient: Send + Sync {
     }
 }
 
-pub async fn fetch_voice_list(config: &Config, llm: Option<&Box<dyn crate::llm::LlmClient>>) -> Result<Vec<Voice>> {
+pub async fn fetch_voice_list(
+    config: &Config,
+    llm: Option<&Box<dyn crate::llm::LlmClient>>,
+) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
         "sovits-offline" => sovits::list_voices(config),
         "acgnai" => acgnai::list_voices(config, llm).await,
-        _ => Err(anyhow::anyhow!("Unknown TTS provider: {}", config.audio.provider)),
+        _ => Err(anyhow::anyhow!(
+            "Unknown TTS provider: {}",
+            config.audio.provider
+        )),
     }
 }
 
-pub async fn create_tts_client(config: &Config, llm: Option<&Box<dyn crate::llm::LlmClient>>) -> Result<Box<dyn TtsClient>> {
+pub async fn create_tts_client(
+    config: &Config,
+    llm: Option<&Box<dyn crate::llm::LlmClient>>,
+) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
         "sovits-offline" => Ok(Box::new(sovits::SovitsTtsClient::new(config).await?)),
@@ -76,7 +85,7 @@ mod tests {
         // However, we cannot access EdgeTtsClient::new_with_voices because EdgeTtsClient is now in edge module and new_with_voices might need to be pub.
         // It is `pub fn new_with_voices` in `src/tts/edge.rs`.
         // So we can access it via `edge::EdgeTtsClient`.
-        
+
         let config = Config {
             input_folder: "".to_string(),
             output_folder: "".to_string(),

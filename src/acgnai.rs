@@ -112,7 +112,11 @@ pub async fn load_or_refresh_metadata(
                                             AcgnaiVoiceMetadata {
                                                 gender: info.gender,
                                                 tags: info.tags,
-                                                emotion: langs.values().cloned().flatten().collect(),
+                                                emotion: langs
+                                                    .values()
+                                                    .cloned()
+                                                    .flatten()
+                                                    .collect(),
                                             },
                                         );
                                     }

@@ -1,9 +1,8 @@
-use async_trait::async_trait;
-use anyhow::{Result, anyhow, Context};
-use serde::{Deserialize, Serialize};
 use crate::config::Config;
+use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-
 
 #[async_trait]
 pub trait LlmClient: Send + Sync + Debug {
@@ -13,18 +12,34 @@ pub trait LlmClient: Send + Sync + Debug {
 pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
     let client: Box<dyn LlmClient> = match config.llm.provider.as_str() {
         "gemini" => {
-            let cfg = config.llm.gemini.as_ref().context("Gemini config missing")?;
+            let cfg = config
+                .llm
+                .gemini
+                .as_ref()
+                .context("Gemini config missing")?;
             Box::new(GeminiClient::new(&cfg.api_key, &cfg.model))
-        },
+        }
         "ollama" => {
-            let cfg = config.llm.ollama.as_ref().context("Ollama config missing")?;
+            let cfg = config
+                .llm
+                .ollama
+                .as_ref()
+                .context("Ollama config missing")?;
             Box::new(OllamaClient::new(&cfg.base_url, &cfg.model))
-        },
+        }
         "openai" => {
-            let cfg = config.llm.openai.as_ref().context("OpenAI config missing")?;
-            Box::new(OpenAIClient::new(&cfg.api_key, &cfg.model, cfg.base_url.as_deref()))
-        },
-        _ => return Err(anyhow!("Unknown LLM provider: {}", config.llm.provider))
+            let cfg = config
+                .llm
+                .openai
+                .as_ref()
+                .context("OpenAI config missing")?;
+            Box::new(OpenAIClient::new(
+                &cfg.api_key,
+                &cfg.model,
+                cfg.base_url.as_deref(),
+            ))
+        }
+        _ => return Err(anyhow!("Unknown LLM provider: {}", config.llm.provider)),
     };
 
     Ok(Box::new(RetryLlmClient {
@@ -53,13 +68,14 @@ impl LlmClient for RetryLlmClient {
                     if err_msg.contains("FATAL:") {
                         return Err(e);
                     }
-                    
+
                     if attempt >= self.retry_count {
-                         return Err(e);
+                        return Err(e);
                     }
-                    
+
                     println!("wait {} sec retry", self.retry_delay_seconds);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(self.retry_delay_seconds)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(self.retry_delay_seconds))
+                        .await;
                     attempt += 1;
                 }
             }
@@ -148,23 +164,30 @@ impl LlmClient for GeminiClient {
         let request_body = GeminiRequest {
             contents: vec![GeminiContent {
                 role: "user".to_string(),
-                parts: vec![GeminiPart { text: user.to_string() }],
+                parts: vec![GeminiPart {
+                    text: user.to_string(),
+                }],
             }],
             system_instruction: Some(GeminiSystemInstruction {
-                parts: vec![GeminiPart { text: system.to_string() }],
+                parts: vec![GeminiPart {
+                    text: system.to_string(),
+                }],
             }),
         };
 
-        let resp = self.client.post(&url)
-            .json(&request_body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&request_body).send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let error_text = resp.text().await?;
-            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-                return Err(anyhow!("FATAL: Gemini API error: {} - {}", status, error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                return Err(anyhow!(
+                    "FATAL: Gemini API error: {} - {}",
+                    status,
+                    error_text
+                ));
             }
             return Err(anyhow!("Gemini API error: {} - {}", status, error_text));
         }
@@ -173,7 +196,13 @@ impl LlmClient for GeminiClient {
         let response_text = resp.text().await?;
         let result: GeminiResponse = match serde_json::from_str(&response_text) {
             Ok(r) => r,
-            Err(e) => return Err(anyhow!("Failed to parse Gemini response: {}. Body: {}", e, response_text)),
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to parse Gemini response: {}. Body: {}",
+                    e,
+                    response_text
+                ))
+            }
         };
 
         if let Some(err) = result.error {
@@ -187,14 +216,17 @@ impl LlmClient for GeminiClient {
                         return Ok(part.text.clone());
                     }
                 }
-                
+
                 // If we get here, content or parts are missing
                 let reason = first.finish_reason.as_deref().unwrap_or("UNKNOWN");
                 return Err(anyhow!("Gemini response empty. Finish reason: {}", reason));
             }
         }
 
-        Err(anyhow!("Gemini response format unexpected or empty. Body: {}", response_text))
+        Err(anyhow!(
+            "Gemini response format unexpected or empty. Body: {}",
+            response_text
+        ))
     }
 }
 
@@ -247,22 +279,31 @@ impl LlmClient for OllamaClient {
         let request_body = OllamaRequest {
             model: self.model.clone(),
             messages: vec![
-                OllamaMessage { role: "system".to_string(), content: system.to_string() },
-                OllamaMessage { role: "user".to_string(), content: user.to_string() },
+                OllamaMessage {
+                    role: "system".to_string(),
+                    content: system.to_string(),
+                },
+                OllamaMessage {
+                    role: "user".to_string(),
+                    content: user.to_string(),
+                },
             ],
             stream: false,
         };
 
-        let resp = self.client.post(&url)
-            .json(&request_body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&request_body).send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let error_text = resp.text().await?;
-            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-                return Err(anyhow!("FATAL: Ollama API error: {} - {}", status, error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                return Err(anyhow!(
+                    "FATAL: Ollama API error: {} - {}",
+                    status,
+                    error_text
+                ));
             }
             return Err(anyhow!("Ollama API error: {} - {}", status, error_text));
         }
@@ -287,7 +328,10 @@ impl OpenAIClient {
         Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
-            base_url: base_url.unwrap_or("https://api.openai.com/v1").trim_end_matches('/').to_string(),
+            base_url: base_url
+                .unwrap_or("https://api.openai.com/v1")
+                .trim_end_matches('/')
+                .to_string(),
             client: reqwest::Client::new(),
         }
     }
@@ -328,12 +372,20 @@ impl LlmClient for OpenAIClient {
         let request_body = OpenAIRequest {
             model: self.model.clone(),
             messages: vec![
-                OpenAIMessage { role: "system".to_string(), content: system.to_string() },
-                OpenAIMessage { role: "user".to_string(), content: user.to_string() },
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: system.to_string(),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: user.to_string(),
+                },
             ],
         };
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request_body)
             .send()
@@ -342,19 +394,25 @@ impl LlmClient for OpenAIClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_text = resp.text().await?;
-            if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-                return Err(anyhow!("FATAL: OpenAI API error: {} - {}", status, error_text));
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                return Err(anyhow!(
+                    "FATAL: OpenAI API error: {} - {}",
+                    status,
+                    error_text
+                ));
             }
             return Err(anyhow!("OpenAI API error: {} - {}", status, error_text));
         }
 
         let result: OpenAIResponse = resp.json().await?;
         if let Some(choice) = result.choices.first() {
-             if let Some(content) = &choice.message.content {
-                 return Ok(content.clone());
-             }
+            if let Some(content) = &choice.message.content {
+                return Ok(content.clone());
+            }
         }
-        
+
         Err(anyhow!("OpenAI response empty or missing content"))
     }
 }
@@ -389,11 +447,14 @@ mod tests {
     #[tokio::test]
     async fn test_retry_transient_success() {
         let failures = Arc::new(Mutex::new(2));
-        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: false });
+        let inner = Box::new(MockFailingClient {
+            failures: failures.clone(),
+            fatal: false,
+        });
         let client = RetryLlmClient {
             inner,
             retry_count: 3,
-            retry_delay_seconds: 0, 
+            retry_delay_seconds: 0,
         };
 
         let result = client.chat("sys", "user").await;
@@ -405,7 +466,10 @@ mod tests {
     #[tokio::test]
     async fn test_retry_exhaustion() {
         let failures = Arc::new(Mutex::new(5));
-        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: false });
+        let inner = Box::new(MockFailingClient {
+            failures: failures.clone(),
+            fatal: false,
+        });
         let client = RetryLlmClient {
             inner,
             retry_count: 2,
@@ -421,7 +485,10 @@ mod tests {
     #[tokio::test]
     async fn test_fatal_no_retry() {
         let failures = Arc::new(Mutex::new(5));
-        let inner = Box::new(MockFailingClient { failures: failures.clone(), fatal: true });
+        let inner = Box::new(MockFailingClient {
+            failures: failures.clone(),
+            fatal: true,
+        });
         let client = RetryLlmClient {
             inner,
             retry_count: 3,
@@ -449,7 +516,7 @@ mod tests {
 
         let result: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidate = &result.candidates.as_ref().unwrap()[0];
-        
+
         assert!(candidate.content.is_none());
         assert_eq!(candidate.finish_reason.as_deref(), Some("SAFETY"));
     }
@@ -469,12 +536,12 @@ mod tests {
 
         let result: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidate = &result.candidates.as_ref().unwrap()[0];
-        
+
         // Content exists but parts are empty (default)
         assert!(candidate.content.is_some());
         assert!(candidate.content.as_ref().unwrap().parts.is_empty());
     }
-    
+
     #[test]
     fn test_gemini_response_parsing_success() {
         let json = r#"{
@@ -491,11 +558,14 @@ mod tests {
                 }
             ]
         }"#;
-        
+
         let result: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidate = &result.candidates.as_ref().unwrap()[0];
-        
-        assert_eq!(candidate.content.as_ref().unwrap().parts[0].text, "Hello world");
+
+        assert_eq!(
+            candidate.content.as_ref().unwrap().parts[0].text,
+            "Hello world"
+        );
     }
 
     #[test]

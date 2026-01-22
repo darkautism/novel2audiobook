@@ -34,6 +34,8 @@ audio:
     default_female_voice: null
   acgnai:
     token: YourAPIKEY
+    enable_mobs: false
+    retry: 5
     concurrency: 5
     model_list_url: https://gsv2p.acgnai.top/models/v4
     infer_url: https://gsv2p.acgnai.top/infer_single
@@ -42,6 +44,6 @@ audio:
     temperature: 1.0
     speed_factor: 1.0
     repetition_penalty: 1.35
-    narrator_voice: 星穹铁道-中文-云璃_ZH
+    narrator_voice: 原神-中文-海妮耶_ZH
     default_male_voice: 星穹铁道-中文-砂金_ZH
     default_female_voice: 原神-中文-香菱_ZH

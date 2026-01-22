@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::script::AudioSegment;
+use crate::sovits::SovitsVoiceLibrary;
 use crate::state::CharacterMap;
+use crate::tts::{TtsClient, Voice, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
-use crate::sovits::SovitsVoiceLibrary;
-use crate::tts::{Voice, TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL};
 
 pub fn list_voices(config: &Config) -> Result<Vec<Voice>> {
     let path = config
@@ -148,9 +148,12 @@ impl TtsClient for SovitsTtsClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-        let voice_id = self
-            .resolve_voice(&segment.speaker, char_map, excluded_voices)
-            .ok_or_else(|| anyhow!("No voice resolved for speaker: {}", segment.speaker))?;
+        let voice_id = if let Some(vid) = &segment.voice_id {
+            vid.clone()
+        } else {
+            self.resolve_voice(&segment.speaker, char_map, excluded_voices)
+                .ok_or_else(|| anyhow!("No voice resolved for speaker: {}", segment.speaker))?
+        };
 
         let voice_def = self
             .voice_library

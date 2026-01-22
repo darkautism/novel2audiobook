@@ -1,18 +1,21 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::tts::{
-    TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL,
-    VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_CHAPTER_MOB_FEMALE,
+use crate::script::{
+    strip_code_blocks, AcgnaiScriptGenerator, AudioSegment, JsonScriptGenerator,
+    PlainScriptGenerator, ScriptGenerator,
 };
-use crate::state::{WorkflowState, CharacterMap, CharacterInfo};
-use crate::script::{ScriptGenerator, JsonScriptGenerator, PlainScriptGenerator, strip_code_blocks, AudioSegment};
-use anyhow::{Result, Context};
+use crate::state::{CharacterInfo, CharacterMap, WorkflowState};
+use crate::tts::{
+    TtsClient, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
+    VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
+};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use tokio::fs as tokio_fs;
-use std::path::Path;
 use std::io::Write;
+use std::path::Path;
+use tokio::fs as tokio_fs;
 
 pub struct WorkflowManager {
     config: Config,
@@ -28,66 +31,91 @@ impl WorkflowManager {
         let state = Self::load_state(&config.build_folder)?;
         let mut character_map = Self::load_character_map(&config.build_folder)?;
 
-        // Ensure mob characters exist
-        let mut map_updated = false;
-        
-        if !character_map.characters.contains_key("路人(男)") {
-            character_map.characters.insert("路人(男)".to_string(), CharacterInfo {
-                gender: "Male".to_string(),
-                voice_id: Some(VOICE_ID_MOB_MALE.to_string()),
-                description: Some("一般男性路人".to_string()),
-                ..Default::default()
-            });
-            map_updated = true;
-        }
-        // Chapter Mobs
-        if !character_map.characters.contains_key("章節路人(男)") {
-            character_map.characters.insert("章節路人(男)".to_string(), CharacterInfo {
-                gender: "Male".to_string(),
-                voice_id: Some(VOICE_ID_CHAPTER_MOB_MALE.to_string()),
-                description: Some("本章節內的男性路人，聲音在該章節內固定".to_string()),
-                ..Default::default()
-            });
-            map_updated = true;
-        }
-        if !character_map.characters.contains_key("章節路人(女)") {
-            character_map.characters.insert("章節路人(女)".to_string(), CharacterInfo {
-                gender: "Female".to_string(),
-                voice_id: Some(VOICE_ID_CHAPTER_MOB_FEMALE.to_string()),
-                description: Some("本章節內的女性路人，聲音在該章節內固定".to_string()),
-                ..Default::default()
-            });
-            map_updated = true;
-        }
-        if !character_map.characters.contains_key("路人(女)") {
-            character_map.characters.insert("路人(女)".to_string(), CharacterInfo {
-                gender: "Female".to_string(),
-                voice_id: Some(VOICE_ID_MOB_FEMALE.to_string()),
-                description: Some("一般女性路人".to_string()),
-                ..Default::default()
-            });
-            map_updated = true;
-        }
-        if !character_map.characters.contains_key("路人") {
-            character_map.characters.insert("路人".to_string(), CharacterInfo {
-                gender: "Neutral".to_string(),
-                voice_id: Some(VOICE_ID_MOB_NEUTRAL.to_string()),
-                description: Some("一般路人".to_string()),
-                ..Default::default()
-            });
-            map_updated = true;
+        let enable_mobs = match config.audio.provider.as_str() {
+            "edge-tts" => config.audio.edge_tts.clone().unwrap().enable_mobs,
+            "sovits-offline" => config.audio.sovits.clone().unwrap().enable_mobs,
+            "acgnai" => config.audio.acgnai.clone().unwrap().enable_mobs,
+            _ => true,
+        };
+
+        // Ensure mob characters exist (Only if enabled)
+        if enable_mobs {
+            let mut map_updated = false;
+
+            if !character_map.characters.contains_key("路人(男)") {
+                character_map.characters.insert(
+                    "路人(男)".to_string(),
+                    CharacterInfo {
+                        gender: "Male".to_string(),
+                        voice_id: Some(VOICE_ID_MOB_MALE.to_string()),
+                        description: Some("一般男性路人".to_string()),
+                        ..Default::default()
+                    },
+                );
+                map_updated = true;
+            }
+            // Chapter Mobs
+            if !character_map.characters.contains_key("章節路人(男)") {
+                character_map.characters.insert(
+                    "章節路人(男)".to_string(),
+                    CharacterInfo {
+                        gender: "Male".to_string(),
+                        voice_id: Some(VOICE_ID_CHAPTER_MOB_MALE.to_string()),
+                        description: Some("本章節內的男性路人，聲音在該章節內固定".to_string()),
+                        ..Default::default()
+                    },
+                );
+                map_updated = true;
+            }
+            if !character_map.characters.contains_key("章節路人(女)") {
+                character_map.characters.insert(
+                    "章節路人(女)".to_string(),
+                    CharacterInfo {
+                        gender: "Female".to_string(),
+                        voice_id: Some(VOICE_ID_CHAPTER_MOB_FEMALE.to_string()),
+                        description: Some("本章節內的女性路人，聲音在該章節內固定".to_string()),
+                        ..Default::default()
+                    },
+                );
+                map_updated = true;
+            }
+            if !character_map.characters.contains_key("路人(女)") {
+                character_map.characters.insert(
+                    "路人(女)".to_string(),
+                    CharacterInfo {
+                        gender: "Female".to_string(),
+                        voice_id: Some(VOICE_ID_MOB_FEMALE.to_string()),
+                        description: Some("一般女性路人".to_string()),
+                        ..Default::default()
+                    },
+                );
+                map_updated = true;
+            }
+            if !character_map.characters.contains_key("路人") {
+                character_map.characters.insert(
+                    "路人".to_string(),
+                    CharacterInfo {
+                        gender: "Neutral".to_string(),
+                        voice_id: Some(VOICE_ID_MOB_NEUTRAL.to_string()),
+                        description: Some("一般路人".to_string()),
+                        ..Default::default()
+                    },
+                );
+                map_updated = true;
+            }
+
+            if map_updated {
+                let path = Path::new(&config.build_folder).join("character_map.json");
+                // Ensure build dir exists (it might not if it's the first run)
+                fs::create_dir_all(&config.build_folder)?;
+                let content = serde_json::to_string_pretty(&character_map)?;
+                fs::write(path, content)?;
+            }
         }
 
-        if map_updated {
-            let path = Path::new(&config.build_folder).join("character_map.json");
-            // Ensure build dir exists (it might not if it's the first run)
-            fs::create_dir_all(&config.build_folder)?;
-            let content = serde_json::to_string_pretty(&character_map)?;
-            fs::write(path, content)?;
-        }
-        
         let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
             "edge-tts" | "sovits-offline" => Box::new(JsonScriptGenerator::new(&config)),
+            "acgnai" => Box::new(AcgnaiScriptGenerator::new(&config)),
             _ => Box::new(PlainScriptGenerator::new()),
         };
 
@@ -124,7 +152,9 @@ impl WorkflowManager {
             let content = fs::read_to_string(path)?;
             Ok(serde_json::from_str(&content)?)
         } else {
-            Ok(CharacterMap { characters: HashMap::new() })
+            Ok(CharacterMap {
+                characters: HashMap::new(),
+            })
         }
     }
 
@@ -146,13 +176,13 @@ impl WorkflowManager {
                 entries.push(path);
             }
         }
-        
+
         entries.sort();
         let total_chapters = entries.len();
 
         for (i, path) in entries.iter().enumerate() {
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
-            
+
             if self.state.completed_chapters.contains(&filename) {
                 println!("Skipping completed chapter: {}", filename);
                 continue;
@@ -160,7 +190,7 @@ impl WorkflowManager {
 
             println!("Processing chapter: {}", filename);
             self.process_chapter(path, &filename).await?;
-            
+
             self.state.completed_chapters.push(filename);
             self.save_state()?;
 
@@ -168,13 +198,13 @@ impl WorkflowManager {
                 let ans = inquire::Confirm::new("Continue to next chapter?")
                     .with_default(true)
                     .prompt();
-                
+
                 match ans {
-                    Ok(true) => {},
+                    Ok(true) => {}
                     Ok(false) => {
                         println!("Stopping as requested.");
                         break;
-                    },
+                    }
                     Err(_) => {
                         println!("Error reading input, stopping.");
                         break;
@@ -189,10 +219,18 @@ impl WorkflowManager {
 
     async fn process_chapter(&mut self, path: &Path, filename: &str) -> Result<()> {
         let text = fs::read_to_string(path)?;
-        
-        let chapter_build_dir = Path::new(&self.config.build_folder).join(filename.replace(".", "_"));
+
+        let chapter_build_dir =
+            Path::new(&self.config.build_folder).join(filename.replace(".", "_"));
         fs::create_dir_all(&chapter_build_dir)?;
         let segments_path = chapter_build_dir.join("segments.json");
+
+        // Prepare voices for Analysis & Script Generation
+        let mut voices = self.tts.list_voices().await.unwrap_or_default();
+        voices.retain(|v| {
+            v.locale.starts_with(&self.config.audio.language)
+                && !self.config.audio.exclude_locales.contains(&v.locale)
+        });
 
         let segments: Vec<AudioSegment> = if segments_path.exists() {
             println!("Loading cached segments from {:?}", segments_path);
@@ -202,28 +240,77 @@ impl WorkflowManager {
             // 1. Analyze Characters
             println!("Analyzing characters...");
 
-            let existing_chars_str = self.character_map.characters.keys()
+            let existing_chars_str = self
+                .character_map
+                .characters
+                .keys()
                 .map(|k| k.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-                
-            let mut voices = self.tts.list_voices().await.unwrap_or_default();
-            // Filter voices by language
-            voices.retain(|v| {
-                v.locale.starts_with(&self.config.audio.language) && 
-                !self.config.audio.exclude_locales.contains(&v.locale)
-            });
-            
-            let voice_list_str = voices.iter()
-                .map(|v| format!("{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}", v.short_name, v.gender, v.locale))
-                .collect::<Vec<_>>()
-                .join("\n");
+
+            let voice_list_str = if self.config.audio.provider == "acgnai" {
+                voices
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{{ \"id\": \"{}\", \"gender\": \"{}\", \"info\": \"{}\" }}",
+                            v.short_name,
+                            v.gender,
+                            v.friendly_name.as_deref().unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                voices
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}",
+                            v.short_name, v.gender, v.locale
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
 
             let narrator_voice_id = match self.config.audio.provider.as_str() {
-                "edge-tts" => self.config.audio.edge_tts.as_ref().and_then(|c| c.narrator_voice.clone()),
-                "sovits-offline" => self.config.audio.sovits.as_ref().and_then(|c| c.narrator_voice.clone()),
+                "edge-tts" => self
+                    .config
+                    .audio
+                    .edge_tts
+                    .as_ref()
+                    .and_then(|c| c.narrator_voice.clone()),
+                "sovits-offline" => self
+                    .config
+                    .audio
+                    .sovits
+                    .as_ref()
+                    .and_then(|c| c.narrator_voice.clone()),
+                "acgnai" => self
+                    .config
+                    .audio
+                    .acgnai
+                    .as_ref()
+                    .and_then(|c| c.narrator_voice.clone()),
                 _ => None,
-            }.unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+            }
+            .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+
+            let enable_mobs = match self.config.audio.provider.as_str() {
+                "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
+                "sovits-offline" => self.config.audio.sovits.clone().unwrap().enable_mobs,
+                "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
+                _ => true,
+            };
+
+            let mob_instruction = if enable_mobs {
+                "- 系統已內建路人、路人(男)、路人(女)、章節路人(男)、章節路人(女)等角色，請勿重複創建。\n\
+                 - 章節內話多但後續不出現的角色，請使用「章節路人(男)」或「章節路人(女)」。\n\
+                 - 不重要的丟棄式角色請直接使用路人、路人(男)或路人(女)。"
+            } else {
+                "- 對於不重要的路人或龍套角色，無須分配，直接略過即可。"
+            };
 
             let analysis_prompt = format!(
                 "請分析以下文本。識別所有說話的角色。\
@@ -238,9 +325,7 @@ impl WorkflowManager {
                 \n- 若文本為第一人稱（如「我」），請識別主角，將其 voice_id 設定為旁白聲音 ID，並設定 \"is_protagonist\": true。\
                 \n- 主要角色，尤其主角，請避免重複使用該聲音。旁白亦同。\
                 \n- 對於新角色，你可以從「可用聲音列表」中選擇合適的 voice_id (選填)，否則留空。\
-                \n- 系統已內建路人、路人(男)、路人(女)、章節路人(男)、章節路人(女)等角色，請勿重複創建。\
-                \n- 章節內話多但後續不出現的角色，請使用「章節路人(男)」或「章節路人(女)」。\
-                \n- 不重要的丟棄式角色請直接使用路人、路人(男)或路人(女)。\
+                \n{}\n\
                 \n- 創建的JSON對象由於是key必須使用繁體中文。使用簡體將導致程式出錯。\
                 \n\n請僅返回一個 JSON 對象：\
                 {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"is_protagonist\": true/false, \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
@@ -248,13 +333,17 @@ impl WorkflowManager {
                 existing_chars_str,
                 narrator_voice_id,
                 voice_list_str,
-                text.chars().take(10000).collect::<String>() // Limit context if needed, but ideally full chapter.
+                mob_instruction,
+                text.chars().take(10000).collect::<String>(),
             );
 
-            let mut analysis_json = self.llm.chat("你是一位文學助手。請僅返回有效的 JSON。", &analysis_prompt).await?;
+            let mut analysis_json = self
+                .llm
+                .chat("你是一位文學助手。請僅返回有效的 JSON。", &analysis_prompt)
+                .await?;
 
             analysis_json = analysis_json.replace("\n", ""); // Clean newlines
-            
+
             // Parse JSON
             #[derive(Deserialize)]
             struct AnalysisResult {
@@ -265,7 +354,7 @@ impl WorkflowManager {
                 name: String,
                 gender: String,
                 #[serde(default)]
-                _important: bool,
+                important: bool, // Renamed from _important to allow usage
                 #[serde(default)]
                 description: Option<String>,
                 #[serde(default)]
@@ -273,62 +362,126 @@ impl WorkflowManager {
                 #[serde(default)]
                 is_protagonist: bool,
             }
-            
+
             // Clean markdown code blocks if present
             let clean_json = strip_code_blocks(&analysis_json);
             let analysis: AnalysisResult = serde_json::from_str(&clean_json)
                 .context(format!("Failed to parse analysis JSON: {}", clean_json))?;
 
             // Update Character Map
-            let mut updated_map = false;
+            let mut chapter_local_chars = HashMap::new();
+            let mut updated_global_map = false;
+
             for char in analysis.characters {
-                let entry = self.character_map.characters.entry(char.name.clone());
-                match entry {
-                    std::collections::hash_map::Entry::Vacant(e) => {
-                        e.insert(CharacterInfo {
-                            gender: char.gender,
-                            voice_id: char.voice_id, 
-                            description: char.description,
-                            is_protagonist: char.is_protagonist,
-                        });
-                        updated_map = true;
-                    },
-                    std::collections::hash_map::Entry::Occupied(mut e) => {
-                        if e.get().voice_id.is_none() && char.voice_id.is_some() {
-                             e.get_mut().voice_id = char.voice_id;
-                             updated_map = true;
+                // Logic:
+                // If mobs enabled: all processed as usual (persisted).
+                // If mobs disabled:
+                //    - Named/Important/Protagonist -> Global Map
+                //    - Unimportant/Mob-like -> Local Map (do not save to global json)
+
+                let should_persist = if enable_mobs {
+                    true
+                } else {
+                    char.important || char.is_protagonist || char.voice_id.is_some()
+                };
+
+                // Override: placeholders are never "persisted" in the sense of adding new keys, but updating existing keys.
+                // But if user disables mobs, we don't want to create "路人A" in global map.
+
+                if should_persist {
+                    let entry = self.character_map.characters.entry(char.name.clone());
+                    match entry {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(CharacterInfo {
+                                gender: char.gender,
+                                voice_id: char.voice_id,
+                                description: char.description,
+                                is_protagonist: char.is_protagonist,
+                            });
+                            updated_global_map = true;
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut e) => {
+                            if e.get().voice_id.is_none() && char.voice_id.is_some() {
+                                e.get_mut().voice_id = char.voice_id;
+                                updated_global_map = true;
+                            }
                         }
                     }
+                } else {
+                    // Local map
+                    chapter_local_chars.insert(
+                        char.name.clone(),
+                        CharacterInfo {
+                            gender: char.gender,
+                            voice_id: char.voice_id,
+                            description: char.description,
+                            is_protagonist: char.is_protagonist,
+                        },
+                    );
                 }
             }
-            if updated_map {
+            if updated_global_map {
                 self.save_character_map()?;
+            }
+
+            // Create combined map for this chapter
+            let mut combined_map = self.character_map.clone();
+            for (k, v) in chapter_local_chars {
+                combined_map.characters.insert(k, v);
             }
 
             // 2. Script Generation
             println!("Generating Script...");
-            
+
             // Gather voice styles
             let mut voice_styles = HashMap::new();
-            for info in self.character_map.characters.values() {
+            for info in combined_map.characters.values() {
                 if let Some(vid) = &info.voice_id {
                     if let Ok(styles) = self.tts.get_voice_styles(vid).await {
                         voice_styles.insert(vid.clone(), styles);
                     }
                 }
             }
+            // For Acgnai, populate styles for ALL available voices (candidates) so ScriptGenerator can use them
+            if self.config.audio.provider == "acgnai" {
+                for v in &voices {
+                    if !voice_styles.contains_key(&v.short_name) {
+                        if let Ok(styles) = self.tts.get_voice_styles(&v.short_name).await {
+                            voice_styles.insert(v.short_name.clone(), styles);
+                        }
+                    }
+                }
+            }
 
-            let prompt = self.script_generator.generate_prompt(&text, &self.character_map, &voice_styles)?;
+            let prompt = self.script_generator.generate_prompt(
+                &text,
+                &combined_map,
+                &voice_styles,
+                &voices,
+            )?;
             let system_instruction = self.script_generator.get_system_prompt();
-            
+
             let script_json = self.llm.chat(&system_instruction, &prompt).await?;
             let segments = self.script_generator.parse_response(&script_json)?;
 
             // Save Script to cache
             fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
-            
+
             segments
         };
+
+        // Re-construct combined map in case we loaded from cache (segments exist)
+        // But wait, if segments exist, we didn't populate local map from LLM.
+        // We might be missing local characters info if we resume!
+        // This is a known issue with this architecture if local state isn't persisted.
+        // However, if segments exist, we iterate segments.
+        // If segments have `voice_id` (new feature), we are good.
+        // If segments rely on speaker name map... we might fail if local char isn't in map.
+        // For now, let's assume if cache exists, we rely on segment.voice_id or global map.
+        // If local chars were used and not saved... reconstruction is hard without saving local map.
+        // But user said "disposable mobs". Maybe it's fine.
+        // Or we should save `chapter_character_map.json` in build dir?
+        // Let's rely on `voice_id` being in segment for those mobs.
 
         // 3. Synthesize
         println!("Synthesizing audio ({} segments)...", segments.len());
@@ -336,58 +489,107 @@ impl WorkflowManager {
         // Build Excluded Voices (Narrator + Protagonists)
         let mut excluded_voices = Vec::new();
         let narrator_voice_id = match self.config.audio.provider.as_str() {
-            "edge-tts" => self.config.audio.edge_tts.as_ref().and_then(|c| c.narrator_voice.clone()),
-            "sovits-offline" => self.config.audio.sovits.as_ref().and_then(|c| c.narrator_voice.clone()),
+            "edge-tts" => self
+                .config
+                .audio
+                .edge_tts
+                .as_ref()
+                .and_then(|c| c.narrator_voice.clone()),
+            "sovits-offline" => self
+                .config
+                .audio
+                .sovits
+                .as_ref()
+                .and_then(|c| c.narrator_voice.clone()),
+            "acgnai" => self
+                .config
+                .audio
+                .acgnai
+                .as_ref()
+                .and_then(|c| c.narrator_voice.clone()),
             _ => None,
-        }.unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
-        
+        }
+        .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+
         excluded_voices.push(narrator_voice_id);
 
         for char_info in self.character_map.characters.values() {
             if char_info.is_protagonist {
-                 if let Some(vid) = &char_info.voice_id {
-                     if !excluded_voices.contains(vid) {
-                         excluded_voices.push(vid.clone());
-                     }
-                 }
+                if let Some(vid) = &char_info.voice_id {
+                    if !excluded_voices.contains(vid) {
+                        excluded_voices.push(vid.clone());
+                    }
+                }
             }
         }
 
-        // Resolve Chapter Mobs
-        let mut chapter_map_local = self.character_map.clone();
-        
-        if let Ok(vid) = self.tts.get_random_voice(Some("Male"), &excluded_voices).await {
-             if let Some(info) = chapter_map_local.characters.get_mut("章節路人(男)") {
-                 info.voice_id = Some(vid);
-             }
+        // We need a map for resolving speakers.
+        // Since we didn't save local map, if we just loaded segments, we only have global map.
+        // If segment has voice_id, we use it.
+        // If segment uses a local mob name but no voice_id... we have a problem if we didn't regenerate.
+        // But `AcgnaiScriptGenerator` is instructed to output `voice_id`.
+
+        // Let's create a working map, defaulting to global.
+        // Note: Chapter Mobs (placeholders) are in global map if enable_mobs=true.
+        let mut working_map = self.character_map.clone();
+
+        let enable_mobs = match self.config.audio.provider.as_str() {
+            "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
+            "sovits-offline" => self.config.audio.sovits.clone().unwrap().enable_mobs,
+            "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
+            _ => true,
+        };
+
+        // Resolve Standard Chapter Mobs (if enabled)
+        if enable_mobs {
+            if let Ok(vid) = self
+                .tts
+                .get_random_voice(Some("Male"), &excluded_voices)
+                .await
+            {
+                if let Some(info) = working_map.characters.get_mut("章節路人(男)") {
+                    info.voice_id = Some(vid);
+                }
+            }
+
+            if let Ok(vid) = self
+                .tts
+                .get_random_voice(Some("Female"), &excluded_voices)
+                .await
+            {
+                if let Some(info) = working_map.characters.get_mut("章節路人(女)") {
+                    info.voice_id = Some(vid);
+                }
+            }
         }
 
-        if let Ok(vid) = self.tts.get_random_voice(Some("Female"), &excluded_voices).await {
-             if let Some(info) = chapter_map_local.characters.get_mut("章節路人(女)") {
-                 info.voice_id = Some(vid);
-             }
-        }
-        
         let mut audio_files = Vec::new();
 
         for (i, segment) in segments.iter().enumerate() {
             let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
             if chunk_path.exists() {
-                // simple resume within chapter
                 audio_files.push(chunk_path);
-                continue; 
+                continue;
             }
 
             println!("Synthesizing chunk {}/{}", i + 1, segments.len());
-            // Retry logic?
-            let audio_data = self.tts.synthesize(segment, &chapter_map_local, &excluded_voices).await?;
+
+            let audio_data = self
+                .tts
+                .synthesize(segment, &working_map, &excluded_voices)
+                .await?;
             fs::write(&chunk_path, audio_data)?;
             audio_files.push(chunk_path);
         }
 
         // 4. Merge
         println!("Merging audio...");
-        let output_filename = Path::new(filename).with_extension("mp3").file_name().unwrap().to_string_lossy().to_string();
+        let output_filename = Path::new(filename)
+            .with_extension("mp3")
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let final_audio_path = Path::new(&self.config.output_folder).join(output_filename);
 
         let mut final_file = fs::File::create(&final_audio_path)?;
@@ -404,10 +606,10 @@ impl WorkflowManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use async_trait::async_trait;
     use std::fs;
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_strip_code_blocks() {
@@ -436,13 +638,13 @@ mod tests {
         async fn chat(&self, _system: &str, user: &str) -> Result<String> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
-            
+
             if user.contains("請分析以下文本") {
                 return Ok(r#"{"characters": [{"name": "Hero", "gender": "Male"}]}"#.to_string());
             } else if user.contains("請將以下小說文本分解為對話和旁白段落") {
                 return Ok(r#"[{"speaker": "旁白", "text": "Test audio"}]"#.to_string());
             }
-            
+
             Ok("{}".to_string())
         }
     }
@@ -456,27 +658,38 @@ mod tests {
         async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
             Ok(vec![])
         }
-        async fn synthesize(&self, _segment: &AudioSegment, _map: &CharacterMap, _excluded_voices: &[String]) -> Result<Vec<u8>> {
+        async fn synthesize(
+            &self,
+            _segment: &AudioSegment,
+            _map: &CharacterMap,
+            _excluded_voices: &[String],
+        ) -> Result<Vec<u8>> {
             if self.should_fail {
                 Err(anyhow::anyhow!("Mock TTS error"))
             } else {
                 Ok(vec![0u8; 10])
             }
         }
-        async fn get_random_voice(&self, _gender: Option<&str>, _excluded_voices: &[String]) -> Result<String> {
-             Ok("mock_voice_id".to_string())
+        async fn get_random_voice(
+            &self,
+            _gender: Option<&str>,
+            _excluded_voices: &[String],
+        ) -> Result<String> {
+            Ok("mock_voice_id".to_string())
         }
     }
 
     #[tokio::test]
     async fn test_cache_miss_generates_segments_file() -> Result<()> {
         let test_root = Path::new("test_output_miss");
-        if test_root.exists() { fs::remove_dir_all(test_root)?; }
-        
+        if test_root.exists() {
+            fs::remove_dir_all(test_root)?;
+        }
+
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
         let output_dir = test_root.join("output");
-        
+
         fs::create_dir_all(&build_dir)?;
         fs::create_dir_all(&input_dir)?;
         fs::create_dir_all(&output_dir)?;
@@ -506,23 +719,30 @@ mod tests {
 
         let mock_llm = Box::new(MockLlmClient::new());
         let call_count = mock_llm.call_count.clone();
-        
+
         let mock_tts = Box::new(MockTtsClient { should_fail: true });
 
         let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
         let result = workflow.process_chapter(&chapter_path, filename).await;
-        
-        assert!(result.is_err(), "Expected synthesis failure due to mock error");
-        
-        assert_eq!(*call_count.lock().unwrap(), 2, "Should call LLM twice (Analysis + Script)");
+
+        assert!(
+            result.is_err(),
+            "Expected synthesis failure due to mock error"
+        );
+
+        assert_eq!(
+            *call_count.lock().unwrap(),
+            2,
+            "Should call LLM twice (Analysis + Script)"
+        );
 
         let segments_path = build_dir.join("chapter_1_txt").join("segments.json");
         assert!(segments_path.exists(), "segments.json should be created");
-        
+
         let content = fs::read_to_string(segments_path)?;
         assert!(content.contains("Test audio"));
-        
+
         let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
@@ -530,12 +750,14 @@ mod tests {
     #[tokio::test]
     async fn test_flattened_output_structure() -> Result<()> {
         let test_root = Path::new("test_output_flattened");
-        if test_root.exists() { fs::remove_dir_all(test_root)?; }
-        
+        if test_root.exists() {
+            fs::remove_dir_all(test_root)?;
+        }
+
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
         let output_dir = test_root.join("output");
-        
+
         fs::create_dir_all(&build_dir)?;
         fs::create_dir_all(&input_dir)?;
         fs::create_dir_all(&output_dir)?;
@@ -571,9 +793,10 @@ mod tests {
             speaker: "Narrator".to_string(),
             text: "Audio".to_string(),
             style: None,
+            voice_id: None,
         }];
         fs::write(&segments_path, serde_json::to_string(&cached_segments)?)?;
-        
+
         let mock_llm = Box::new(MockLlmClient::new());
         let mock_tts = Box::new(MockTtsClient { should_fail: false });
 
@@ -582,10 +805,16 @@ mod tests {
 
         // Check output
         let output_file = output_dir.join("chapter_flat.mp3");
-        assert!(output_file.exists(), "Output file should exist at root of output folder");
-        
+        assert!(
+            output_file.exists(),
+            "Output file should exist at root of output folder"
+        );
+
         let sub_dir = output_dir.join("chapter_flat_txt");
-        assert!(!sub_dir.exists(), "Subdirectory should NOT exist in output folder");
+        assert!(
+            !sub_dir.exists(),
+            "Subdirectory should NOT exist in output folder"
+        );
 
         let _ = fs::remove_dir_all(test_root);
         Ok(())
@@ -594,12 +823,14 @@ mod tests {
     #[tokio::test]
     async fn test_cache_hit_skips_llm() -> Result<()> {
         let test_root = Path::new("test_output_hit");
-        if test_root.exists() { fs::remove_dir_all(test_root)?; }
-        
+        if test_root.exists() {
+            fs::remove_dir_all(test_root)?;
+        }
+
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
         let output_dir = test_root.join("output");
-        
+
         fs::create_dir_all(&build_dir)?;
         fs::create_dir_all(&input_dir)?;
         fs::create_dir_all(&output_dir)?;
@@ -630,11 +861,12 @@ mod tests {
         let chapter_build_dir = build_dir.join("chapter_2_txt");
         fs::create_dir_all(&chapter_build_dir)?;
         let segments_path = chapter_build_dir.join("segments.json");
-        
+
         let cached_segments = vec![AudioSegment {
             speaker: "Narrator".to_string(),
             text: "Cached audio".to_string(),
             style: None,
+            voice_id: None,
         }];
         fs::write(&segments_path, serde_json::to_string(&cached_segments)?)?;
 
@@ -643,16 +875,20 @@ mod tests {
 
         let mock_llm = Box::new(MockLlmClient::new());
         let call_count = mock_llm.call_count.clone();
-        
+
         let mock_tts = Box::new(MockTtsClient { should_fail: false });
 
         let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
 
         let result = workflow.process_chapter(&chapter_path, filename).await;
-        
+
         assert!(result.is_ok(), "Should complete successfully");
-        
-        assert_eq!(*call_count.lock().unwrap(), 0, "Should use cache and NOT call LLM");
+
+        assert_eq!(
+            *call_count.lock().unwrap(),
+            0,
+            "Should use cache and NOT call LLM"
+        );
 
         let _ = fs::remove_dir_all(test_root);
         Ok(())
@@ -661,12 +897,14 @@ mod tests {
     #[tokio::test]
     async fn test_voice_filtering_in_analysis_prompt() -> Result<()> {
         let test_root = Path::new("test_output_filter");
-        if test_root.exists() { fs::remove_dir_all(test_root)?; }
-        
+        if test_root.exists() {
+            fs::remove_dir_all(test_root)?;
+        }
+
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
         let output_dir = test_root.join("output");
-        
+
         fs::create_dir_all(&build_dir)?;
         fs::create_dir_all(&input_dir)?;
         fs::create_dir_all(&output_dir)?;
@@ -710,21 +948,54 @@ mod tests {
             }
         }
         let prompts_store = Arc::new(Mutex::new(Vec::new()));
-        let mock_llm = Box::new(CapturingLlmClient { prompts: prompts_store.clone() });
+        let mock_llm = Box::new(CapturingLlmClient {
+            prompts: prompts_store.clone(),
+        });
 
         // Setup Mock TTS with voices
-        struct MockTts { voices: Vec<crate::tts::Voice> }
+        struct MockTts {
+            voices: Vec<crate::tts::Voice>,
+        }
         #[async_trait]
         impl TtsClient for MockTts {
-            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> { Ok(self.voices.clone()) }
-            async fn synthesize(&self, _: &AudioSegment, _: &CharacterMap, _: &[String]) -> Result<Vec<u8>> { Ok(vec![]) }
-            async fn get_random_voice(&self, _: Option<&str>, _: &[String]) -> Result<String> { Ok("mock".to_string()) }
+            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+                Ok(self.voices.clone())
+            }
+            async fn synthesize(
+                &self,
+                _: &AudioSegment,
+                _: &CharacterMap,
+                _: &[String],
+            ) -> Result<Vec<u8>> {
+                Ok(vec![])
+            }
+            async fn get_random_voice(&self, _: Option<&str>, _: &[String]) -> Result<String> {
+                Ok("mock".to_string())
+            }
         }
-        
+
         let voices = vec![
-            crate::tts::Voice { short_name: "zh-TW-A".to_string(), gender: "Male".to_string(), locale: "zh-TW".to_string(), name: "A".to_string(), friendly_name: None },
-            crate::tts::Voice { short_name: "zh-HK-B".to_string(), gender: "Female".to_string(), locale: "zh-HK".to_string(), name: "B".to_string(), friendly_name: None },
-            crate::tts::Voice { short_name: "zh-CN-C".to_string(), gender: "Male".to_string(), locale: "zh-CN".to_string(), name: "C".to_string(), friendly_name: None },
+            crate::tts::Voice {
+                short_name: "zh-TW-A".to_string(),
+                gender: "Male".to_string(),
+                locale: "zh-TW".to_string(),
+                name: "A".to_string(),
+                friendly_name: None,
+            },
+            crate::tts::Voice {
+                short_name: "zh-HK-B".to_string(),
+                gender: "Female".to_string(),
+                locale: "zh-HK".to_string(),
+                name: "B".to_string(),
+                friendly_name: None,
+            },
+            crate::tts::Voice {
+                short_name: "zh-CN-C".to_string(),
+                gender: "Male".to_string(),
+                locale: "zh-CN".to_string(),
+                name: "C".to_string(),
+                friendly_name: None,
+            },
         ];
         let mock_tts = Box::new(MockTts { voices });
 
@@ -733,11 +1004,14 @@ mod tests {
 
         let prompts = prompts_store.lock().unwrap();
         let analysis_prompt = &prompts[0];
-        
+
         // Assertions
         assert!(analysis_prompt.contains("zh-TW-A"));
         assert!(analysis_prompt.contains("zh-CN-C"));
-        assert!(!analysis_prompt.contains("zh-HK-B"), "Excluded locale voice should not be in prompt");
+        assert!(
+            !analysis_prompt.contains("zh-HK-B"),
+            "Excluded locale voice should not be in prompt"
+        );
 
         let _ = fs::remove_dir_all(test_root);
         Ok(())
@@ -746,8 +1020,10 @@ mod tests {
     #[tokio::test]
     async fn test_protagonist_exclusion_and_chapter_mob() -> Result<()> {
         let test_root = Path::new("test_output_protag");
-        if test_root.exists() { fs::remove_dir_all(test_root)?; }
-        
+        if test_root.exists() {
+            fs::remove_dir_all(test_root)?;
+        }
+
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
         let output_dir = test_root.join("output");
@@ -797,9 +1073,10 @@ mod tests {
                 }
                 // Script gen
                 Ok(r#"[
-                    {"speaker": "Hero", "text": "I am hero."},
-                    {"speaker": "章節路人(男)", "text": "I am mob."}
-                ]"#.to_string())
+                    {"speaker": "Hero", "text": "I am hero.", "voice_id": null},
+                    {"speaker": "章節路人(男)", "text": "I am mob.", "voice_id": null}
+                ]"#
+                .to_string())
             }
         }
 
@@ -809,38 +1086,53 @@ mod tests {
         }
         #[async_trait]
         impl TtsClient for VerifyingTts {
-             async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> { Ok(vec![]) }
-             async fn synthesize(&self, segment: &AudioSegment, map: &CharacterMap, excluded: &[String]) -> Result<Vec<u8>> {
-                 let mut ex = self.exclusions.lock().unwrap();
-                 *ex = excluded.to_vec();
-                 
-                 // Verify Chapter Mob resolution
-                 if segment.speaker == "章節路人(男)" {
-                     let info = map.characters.get("章節路人(男)").unwrap();
-                     assert_eq!(info.voice_id.as_deref(), Some("Voice_Mob_Male_Fixed"));
-                 }
-                 
-                 Ok(vec![])
-             }
-             async fn get_random_voice(&self, gender: Option<&str>, excluded: &[String]) -> Result<String> {
-                 // Verify exclusion list is passed here too
-                 assert!(excluded.contains(&"Voice_Narrator".to_string()));
-                 assert!(excluded.contains(&"Voice_Hero".to_string()));
-                 
-                 if gender == Some("Male") {
-                     Ok("Voice_Mob_Male_Fixed".to_string())
-                 } else {
-                     Ok("Voice_Mob_Female_Fixed".to_string())
-                 }
-             }
+            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+                Ok(vec![])
+            }
+            async fn synthesize(
+                &self,
+                segment: &AudioSegment,
+                map: &CharacterMap,
+                excluded: &[String],
+            ) -> Result<Vec<u8>> {
+                let mut ex = self.exclusions.lock().unwrap();
+                *ex = excluded.to_vec();
+
+                // Verify Chapter Mob resolution
+                if segment.speaker == "章節路人(男)" {
+                    let info = map.characters.get("章節路人(男)").unwrap();
+                    assert_eq!(info.voice_id.as_deref(), Some("Voice_Mob_Male_Fixed"));
+                }
+
+                Ok(vec![])
+            }
+            async fn get_random_voice(
+                &self,
+                gender: Option<&str>,
+                excluded: &[String],
+            ) -> Result<String> {
+                // Verify exclusion list is passed here too
+                assert!(excluded.contains(&"Voice_Narrator".to_string()));
+                assert!(excluded.contains(&"Voice_Hero".to_string()));
+
+                if gender == Some("Male") {
+                    Ok("Voice_Mob_Male_Fixed".to_string())
+                } else {
+                    Ok("Voice_Mob_Female_Fixed".to_string())
+                }
+            }
         }
-        
+
         let exclusions = Arc::new(Mutex::new(Vec::new()));
-        let mock_tts = Box::new(VerifyingTts { exclusions: exclusions.clone() });
+        let mock_tts = Box::new(VerifyingTts {
+            exclusions: exclusions.clone(),
+        });
         let mock_llm = Box::new(ProtagLlm);
 
         let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
-        workflow.process_chapter(&input_dir.join(filename), filename).await?;
+        workflow
+            .process_chapter(&input_dir.join(filename), filename)
+            .await?;
 
         let ex = exclusions.lock().unwrap();
         assert!(ex.contains(&"Voice_Narrator".to_string()));

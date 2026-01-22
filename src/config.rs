@@ -1,16 +1,16 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use anyhow::{Context, Result};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_input")]
     pub input_folder: String,
-    
+
     #[serde(default = "default_output")]
     pub output_folder: String,
-    
+
     #[serde(default = "default_build")]
     pub build_folder: String,
 
@@ -63,13 +63,13 @@ pub struct AudioConfig {
 
     #[serde(default = "default_exclude_locales")]
     pub exclude_locales: Vec<String>,
-    
+
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
-    
+
     #[serde(rename = "sovits-offline")]
     pub sovits: Option<SovitsConfig>,
-    
+
     pub acgnai: Option<AcgnaiConfig>,
 }
 
@@ -79,31 +79,42 @@ pub struct EdgeTtsConfig {
     pub default_male_voice: Option<String>,
     pub default_female_voice: Option<String>,
     #[serde(default)]
-    pub style : bool,
+    pub style: bool,
+
+    #[serde(default = "default_enable_mobs")]
+    pub enable_mobs: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SovitsConfig {
     #[serde(default = "default_sovits_base_url")]
     pub base_url: String,
     #[serde(default = "default_sovits_voice_map")]
     pub voice_map_path: String,
-    
+
+    #[serde(default = "default_enable_mobs")]
+    pub enable_mobs: bool,
     pub narrator_voice: Option<String>,
     pub default_male_voice: Option<String>,
     pub default_female_voice: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AcgnaiConfig {
     pub token: String,
-    
+
+    #[serde(default)]
+    pub retry: i32,
+
+    #[serde(default = "default_enable_mobs")]
+    pub enable_mobs: bool,
+
     #[serde(default = "default_acgnai_concurrency")]
     pub concurrency: usize,
-    
+
     #[serde(default = "default_acgnai_model_list_url")]
     pub model_list_url: String,
-    
+
     #[serde(default = "default_acgnai_infer_url")]
     pub infer_url: String,
 
@@ -123,26 +134,64 @@ pub struct AcgnaiConfig {
     pub default_female_voice: Option<String>,
 }
 
-fn default_input() -> String { "input".to_string() }
-fn default_output() -> String { "output".to_string() }
-fn default_build() -> String { "build".to_string() }
-fn default_language() -> String { "zh".to_string() }
-fn default_exclude_locales() -> Vec<String> { vec![] }
-fn default_retry_count() -> usize { 3 }
-fn default_retry_delay() -> u64 { 10 }
-fn default_tts_provider() -> String { "edge-tts".to_string() }
-fn default_sovits_base_url() -> String { "http://127.0.0.1:9880".to_string() }
-fn default_sovits_voice_map() -> String { "sovits_voices.json".to_string() }
+fn default_input() -> String {
+    "input".to_string()
+}
+fn default_output() -> String {
+    "output".to_string()
+}
+fn default_build() -> String {
+    "build".to_string()
+}
+fn default_language() -> String {
+    "zh".to_string()
+}
+fn default_enable_mobs() -> bool {
+    true
+}
+fn default_exclude_locales() -> Vec<String> {
+    vec![]
+}
+fn default_retry_count() -> usize {
+    3
+}
+fn default_retry_delay() -> u64 {
+    10
+}
+fn default_tts_provider() -> String {
+    "edge-tts".to_string()
+}
+fn default_sovits_base_url() -> String {
+    "http://127.0.0.1:9880".to_string()
+}
+fn default_sovits_voice_map() -> String {
+    "sovits_voices.json".to_string()
+}
 
-fn default_acgnai_concurrency() -> usize { 5 }
-fn default_acgnai_model_list_url() -> String { "https://gsv2p.acgnai.top/models/v4".to_string() }
-fn default_acgnai_infer_url() -> String { "https://gsv2p.acgnai.top/infer_single".to_string() }
-fn default_acgnai_top_k() -> i32 { 10 }
-fn default_acgnai_top_p() -> f64 { 1.0 }
-fn default_acgnai_temperature() -> f64 { 1.0 }
-fn default_acgnai_speed_factor() -> f64 { 1.0 }
-fn default_acgnai_repetition_penalty() -> f64 { 1.35 }
-
+fn default_acgnai_concurrency() -> usize {
+    5
+}
+fn default_acgnai_model_list_url() -> String {
+    "https://gsv2p.acgnai.top/models/v4".to_string()
+}
+fn default_acgnai_infer_url() -> String {
+    "https://gsv2p.acgnai.top/infer_single".to_string()
+}
+fn default_acgnai_top_k() -> i32 {
+    10
+}
+fn default_acgnai_top_p() -> f64 {
+    1.0
+}
+fn default_acgnai_temperature() -> f64 {
+    1.0
+}
+fn default_acgnai_speed_factor() -> f64 {
+    1.0
+}
+fn default_acgnai_repetition_penalty() -> f64 {
+    1.35
+}
 
 impl Config {
     pub fn load() -> Result<Self> {
@@ -150,9 +199,10 @@ impl Config {
         if !path.exists() {
             anyhow::bail!("config.yml not found. Please create one.");
         }
-        
+
         let content = fs::read_to_string(path).context("Failed to read config.yml")?;
-        let config: Config = serde_norway::from_str(&content).context("Failed to parse config.yml")?;
+        let config: Config =
+            serde_norway::from_str(&content).context("Failed to parse config.yml")?;
         Ok(config)
     }
 
@@ -161,7 +211,7 @@ impl Config {
         fs::write("config.yml", content).context("Failed to write config.yml")?;
         Ok(())
     }
-    
+
     pub fn ensure_directories(&self) -> Result<()> {
         fs::create_dir_all(&self.input_folder)?;
         fs::create_dir_all(&self.output_folder)?;

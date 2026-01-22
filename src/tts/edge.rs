@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use reqwest::header::{HeaderMap, HeaderValue};
 
-use crate::tts::{Voice, TtsClient, VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL};
+use crate::tts::{TtsClient, Voice, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL};
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const CHROMIUM_MAJOR_VERSION: &str = "143";
@@ -218,7 +218,11 @@ impl TtsClient for EdgeTtsClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-        let voice = self.resolve_voice(&segment.speaker, char_map, excluded_voices);
+        let voice = if let Some(vid) = &segment.voice_id {
+            vid.clone()
+        } else {
+            self.resolve_voice(&segment.speaker, char_map, excluded_voices)
+        };
         let using_style = self.config.audio.edge_tts.clone().unwrap_or_default().style;
         let ssml = match (using_style, &segment.style) {
             (true, Some(style)) =>format!(

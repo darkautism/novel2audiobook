@@ -1,20 +1,23 @@
-use crate::config::Config;
-use crate::tts::{
-    TtsClient, Voice, 
-    VOICE_ID_MOB_MALE, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_NEUTRAL,
-    VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_CHAPTER_MOB_FEMALE
-};
 use crate::acgnai::{load_or_refresh_metadata, AcgnaiVoiceMap};
+use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::script::AudioSegment;
 use crate::state::CharacterMap;
-use anyhow::{anyhow, Result, Context};
+use crate::tts::{
+    TtsClient, Voice, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
+    VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
+};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use serde_json::json;
 use tokio::sync::Semaphore;
-use std::process::{Command, Stdio};
-use std::io::Write;
+
+#[derive(serde::Deserialize)]
+struct AcgnaiDownloadResponse {
+    msg: String,
+    audio_url: String,
+}
 
 pub async fn list_voices(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Vec<Voice>> {
     let metadata = load_or_refresh_metadata(config, llm).await?;
@@ -22,15 +25,16 @@ pub async fn list_voices(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> R
 }
 
 fn metadata_to_voices(metadata: &AcgnaiVoiceMap) -> Vec<Voice> {
-    metadata.iter().map(|(name, meta)| {
-        Voice {
+    metadata
+        .iter()
+        .map(|(name, meta)| Voice {
             name: name.clone(),
             short_name: name.clone(),
             gender: meta.gender.clone(),
             locale: "zh".to_string(),
             friendly_name: Some(format!("{} {:?}", name, meta.tags)),
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 pub struct AcgnaiClient {
@@ -42,8 +46,13 @@ pub struct AcgnaiClient {
 impl AcgnaiClient {
     pub async fn new(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Self> {
         let metadata = load_or_refresh_metadata(config, llm).await?;
-        let concurrency = config.audio.acgnai.as_ref().map(|c| c.concurrency).unwrap_or(5);
-        
+        let concurrency = config
+            .audio
+            .acgnai
+            .as_ref()
+            .map(|c| c.concurrency)
+            .unwrap_or(5);
+
         Ok(Self {
             config: config.clone(),
             metadata,
@@ -51,31 +60,47 @@ impl AcgnaiClient {
         })
     }
 
-    fn pick_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> Result<String> {
+    fn pick_random_voice(
+        &self,
+        gender: Option<&str>,
+        excluded_voices: &[String],
+    ) -> Result<String> {
         let mut rng = rand::rng();
-        let candidates: Vec<&String> = self.metadata.iter()
+        let candidates: Vec<&String> = self
+            .metadata
+            .iter()
             .filter_map(|(name, meta)| {
-                if excluded_voices.contains(name) { return None; }
+                if excluded_voices.contains(name) {
+                    return None;
+                }
                 if let Some(g) = gender {
-                    if !meta.gender.eq_ignore_ascii_case(g) { return None; }
+                    if !meta.gender.eq_ignore_ascii_case(g) {
+                        return None;
+                    }
                 }
                 Some(name)
             })
             .collect();
-            
+
         if let Some(v) = candidates.choose(&mut rng) {
             Ok(v.to_string())
         } else {
             // Fallback to any voice not excluded?
-            let fallback: Vec<&String> = self.metadata.keys()
+            let fallback: Vec<&String> = self
+                .metadata
+                .keys()
                 .filter(|k| !excluded_voices.contains(k))
                 .collect();
-             if let Some(v) = fallback.choose(&mut rng) {
-                 Ok(v.to_string())
-             } else {
-                 // Absolute fallback
-                 self.metadata.keys().next().cloned().ok_or_else(|| anyhow!("No Acgnai voices available"))
-             }
+            if let Some(v) = fallback.choose(&mut rng) {
+                Ok(v.to_string())
+            } else {
+                // Absolute fallback
+                self.metadata
+                    .keys()
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| anyhow!("No Acgnai voices available"))
+            }
         }
     }
 
@@ -85,15 +110,20 @@ impl AcgnaiClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<String> {
-        let acgnai_config = self.config.audio.acgnai.as_ref().ok_or_else(|| anyhow!("Acgnai config missing"))?;
+        let acgnai_config = self
+            .config
+            .audio
+            .acgnai
+            .as_ref()
+            .ok_or_else(|| anyhow!("Acgnai config missing"))?;
 
         // 1. Narrator
         if speaker == "旁白" || speaker.eq_ignore_ascii_case("Narrator") {
             if let Some(v) = &acgnai_config.narrator_voice {
                 return Ok(v.clone());
             }
-             // If no narrator set, use random female?
-             return self.pick_random_voice(Some("Female"), excluded_voices);
+            // If no narrator set, use random female?
+            return self.pick_random_voice(Some("Female"), excluded_voices);
         }
 
         // 2. Character Map
@@ -113,7 +143,7 @@ impl AcgnaiClient {
                     _ => return Ok(voice_id.clone()),
                 }
             }
-            
+
             // 3. Gender default
             match info.gender.to_lowercase().as_str() {
                 "male" => {
@@ -128,7 +158,7 @@ impl AcgnaiClient {
                 }
                 _ => {}
             }
-            
+
             // Random based on gender
             return self.pick_random_voice(Some(&info.gender), excluded_voices);
         }
@@ -145,11 +175,11 @@ impl TtsClient for AcgnaiClient {
     }
 
     async fn get_voice_styles(&self, voice_id: &str) -> Result<Vec<String>> {
-         if let Some(meta) = self.metadata.get(voice_id) {
-             Ok(meta.emotion.clone())
-         } else {
-             Ok(Vec::new())
-         }
+        if let Some(meta) = self.metadata.get(voice_id) {
+            Ok(meta.emotion.clone())
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     async fn synthesize(
@@ -158,82 +188,91 @@ impl TtsClient for AcgnaiClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-        let _permit = self.semaphore.acquire().await.context("Semaphore acquisition failed")?;
-        
-        let voice_id = self.resolve_voice(&segment.speaker, char_map, excluded_voices).await?;
-        let acgnai_config = self.config.audio.acgnai.as_ref().ok_or_else(|| anyhow!("Acgnai config missing"))?;
-        
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .context("Semaphore acquisition failed")?;
+
+        let voice_id = if let Some(vid) = &segment.voice_id {
+            vid.clone()
+        } else {
+            self.resolve_voice(&segment.speaker, char_map, excluded_voices)
+                .await?
+        };
+        let acgnai_config = self
+            .config
+            .audio
+            .acgnai
+            .as_ref()
+            .ok_or_else(|| anyhow!("Acgnai config missing"))?;
+
         let payload = json!({
-          "version": "v4",
-          "model_name": voice_id,
-          "prompt_text_lang": "",
+          "batch_size": 10,
+          "batch_threshold": 0.75,
           "emotion": segment.style.clone().unwrap_or_default(),
+          "fragment_interval": 0.3,
+          "if_sr": false,
+          "media_type": "mp3",
+          "model_name": voice_id,
+          "parallel_infer": true,
+          "prompt_text_lang": "中文",
+          "repetition_penalty": acgnai_config.repetition_penalty,
+          "sample_steps": 16,
+          "seed": -1,
+          "speed_facter": acgnai_config.speed_factor,
+          "split_bucket": true,
+          "version": "v4",
           "text": segment.text,
-          "text_lang": "zh", 
+          "text_lang": "中文",
           "top_k": acgnai_config.top_k,
           "top_p": acgnai_config.top_p,
           "temperature": acgnai_config.temperature,
           "text_split_method": "按标点符号切",
-          "batch_size": 1,
-          "batch_threshold": 0.75,
-          "split_bucket": true,
-          "speed_facter": acgnai_config.speed_factor,
-          "fragment_interval": 0.3,
-          "media_type": "wav",
-          "parallel_infer": true,
-          "repetition_penalty": acgnai_config.repetition_penalty,
-          "seed": -1,
-          "sample_steps": 16,
-          "if_sr": false
         });
 
         let client = reqwest::Client::new();
-        let mut req = client.post(&acgnai_config.infer_url).json(&payload);
-        
-        if !acgnai_config.token.is_empty() {
-             req = req.header("Authorization", format!("Bearer {}", acgnai_config.token));
-        }
 
-        let resp = req.send().await?;
-        if !resp.status().is_success() {
-             let txt = resp.text().await?;
-             return Err(anyhow!("Acgnai synthesis failed: {}", txt));
+        let mut retry = acgnai_config.retry;
+        let mut download_url = String::new();
+        while retry > 0 {
+            let mut req = client.post(&acgnai_config.infer_url).json(&payload);
+
+            if !acgnai_config.token.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", acgnai_config.token));
+            }
+            let resp = req.send().await?;
+            if !resp.status().is_success() {
+                let txt = resp.text().await?;
+                return Err(anyhow!("Acgnai synthesis failed: {}", txt));
+            }
+
+            let body_text = resp.text().await?;
+
+            // Handle cases where it might be quoted
+            let response = body_text.trim().trim_matches('"').to_string();
+            let download_response: AcgnaiDownloadResponse =
+                serde_json::from_str(&response).unwrap();
+            if download_response.msg != "合成成功" {
+                if retry == 1 {
+                    return Err(anyhow!(
+                        "Acgnai synthesis failed: {}",
+                        download_response.msg
+                    ));
+                } else {
+                    retry -= 1;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    continue;
+                }
+            }
+            download_url = download_response.audio_url;
         }
-        
-        // Response is likely the URL string directly, or a JSON with "data" or "url".
-        // User said: "成了以後會回傳一字串" (returns a string).
-        let body_text = resp.text().await?;
-        
-        // Handle cases where it might be quoted
-        let download_url = body_text.trim().trim_matches('"').to_string();
-        
-        println!("Acgnai Download URL: {}", download_url); 
 
         // Download WAV
         let wav_resp = client.get(&download_url).send().await?;
         let wav_bytes = wav_resp.bytes().await?;
 
-        // Convert to MP3
-        let mut child = Command::new("ffmpeg")
-            .args(&["-f", "wav", "-i", "pipe:0", "-f", "mp3", "-b:a", "192k", "-y", "pipe:1"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null()) 
-            .spawn()
-            .context("Failed to spawn ffmpeg")?;
-
-        {
-            let stdin = child.stdin.as_mut().context("Failed to open ffmpeg stdin")?;
-            stdin.write_all(&wav_bytes).context("Failed to write to ffmpeg stdin")?;
-        }
-
-        let output = child.wait_with_output().context("Failed to wait for ffmpeg")?;
-        
-        if !output.status.success() {
-            return Err(anyhow!("ffmpeg conversion failed"));
-        }
-
-        Ok(output.stdout)
+        Ok(wav_bytes.into())
     }
 
     async fn get_random_voice(

@@ -3,7 +3,6 @@ mod config;
 mod llm;
 mod script;
 mod setup;
-mod sovits;
 mod state;
 mod tts;
 mod workflow;

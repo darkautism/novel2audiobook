@@ -62,59 +62,7 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
                     needs_save = true;
                 }
             }
-        }
-        "sovits-offline" => {
-            if config.audio.sovits.is_none() {
-                // Initialize with defaults if missing
-                config.audio.sovits = Some(crate::config::SovitsConfig {
-                    base_url: "http://127.0.0.1:9880".to_string(),
-                    voice_map_path: "sovits_voices.json".to_string(),
-                    narrator_voice: None,
-                    default_male_voice: None,
-                    default_female_voice: None,
-                    ..Default::default()
-                });
-            }
-
-            let setup_needed = {
-                let cfg = config.audio.sovits.as_ref().unwrap();
-                cfg.narrator_voice.is_none()
-                    || cfg.default_male_voice.is_none()
-                    || cfg.default_female_voice.is_none()
-            };
-
-            if setup_needed {
-                println!("Loading SoVITS voices from library...");
-                let voices = fetch_voice_list(config, llm).await?;
-
-                if voices.is_empty() {
-                    return Err(anyhow!("No SoVITS voices found. Check sovits_voices.json"));
-                }
-
-                let cfg = config.audio.sovits.as_mut().unwrap();
-
-                if cfg.narrator_voice.is_none() {
-                    cfg.narrator_voice =
-                        Some(select_voice("Select Narrator Voice:", &voices, |_| true)?);
-                    needs_save = true;
-                }
-                if cfg.default_male_voice.is_none() {
-                    cfg.default_male_voice =
-                        Some(select_voice("Select Default Male Voice:", &voices, |v| {
-                            v.gender.eq_ignore_ascii_case("Male")
-                        })?);
-                    needs_save = true;
-                }
-                if cfg.default_female_voice.is_none() {
-                    cfg.default_female_voice = Some(select_voice(
-                        "Select Default Female Voice:",
-                        &voices,
-                        |v| v.gender.eq_ignore_ascii_case("Female"),
-                    )?);
-                    needs_save = true;
-                }
-            }
-        }
+        },
         "acgnai" => {
             if config.audio.acgnai.is_none() {
                 config.audio.acgnai = Some(crate::config::AcgnaiConfig {

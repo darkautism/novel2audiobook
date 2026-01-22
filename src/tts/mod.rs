@@ -49,7 +49,6 @@ pub async fn fetch_voice_list(
 ) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
-        "sovits-offline" => sovits::list_voices(config),
         "acgnai" => acgnai::list_voices(config, llm).await,
         _ => Err(anyhow::anyhow!(
             "Unknown TTS provider: {}",
@@ -64,7 +63,6 @@ pub async fn create_tts_client(
 ) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
-        "sovits-offline" => Ok(Box::new(sovits::SovitsTtsClient::new(config).await?)),
         "acgnai" => Ok(Box::new(acgnai::AcgnaiClient::new(config, llm).await?)),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
@@ -72,7 +70,6 @@ pub async fn create_tts_client(
 
 pub mod acgnai;
 pub mod edge;
-pub mod sovits;
 
 #[cfg(test)]
 mod tests {

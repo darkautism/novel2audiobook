@@ -33,7 +33,6 @@ impl WorkflowManager {
 
         let enable_mobs = match config.audio.provider.as_str() {
             "edge-tts" => config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "sovits-offline" => config.audio.sovits.clone().unwrap().enable_mobs,
             "acgnai" => config.audio.acgnai.clone().unwrap().enable_mobs,
             _ => true,
         };
@@ -114,7 +113,7 @@ impl WorkflowManager {
         }
 
         let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
-            "edge-tts" | "sovits-offline" => Box::new(JsonScriptGenerator::new(&config)),
+            "edge-tts" => Box::new(JsonScriptGenerator::new(&config)),
             "acgnai" => Box::new(AcgnaiScriptGenerator::new(&config)),
             _ => Box::new(PlainScriptGenerator::new()),
         };
@@ -281,12 +280,6 @@ impl WorkflowManager {
                     .edge_tts
                     .as_ref()
                     .and_then(|c| c.narrator_voice.clone()),
-                "sovits-offline" => self
-                    .config
-                    .audio
-                    .sovits
-                    .as_ref()
-                    .and_then(|c| c.narrator_voice.clone()),
                 "acgnai" => self
                     .config
                     .audio
@@ -299,7 +292,6 @@ impl WorkflowManager {
 
             let enable_mobs = match self.config.audio.provider.as_str() {
                 "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-                "sovits-offline" => self.config.audio.sovits.clone().unwrap().enable_mobs,
                 "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
                 _ => true,
             };
@@ -327,7 +319,7 @@ impl WorkflowManager {
                 \n- 對於新角色，你可以從「可用聲音列表」中選擇合適的 voice_id (選填)，否則留空。\
                 \n{}\n\
                 \n- 創建的JSON對象由於是key必須使用繁體中文。使用簡體將導致程式出錯。\
-                \n\n請僅返回一個 JSON 對象：\
+                \n\n請僅返回一個 JSON 對象(不可翻譯json key)：\
                 {{ \"characters\": [ {{ \"name\": \"...\", \"gender\": \"Male/Female\", \"is_protagonist\": true/false, \"important\": true/false, \"description\": \"...\", \"voice_id\": \"...\" }} ] }} \
                 \n\n文本：\n{}", 
                 existing_chars_str,
@@ -495,12 +487,6 @@ impl WorkflowManager {
                 .edge_tts
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
-            "sovits-offline" => self
-                .config
-                .audio
-                .sovits
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
             "acgnai" => self
                 .config
                 .audio
@@ -535,7 +521,6 @@ impl WorkflowManager {
 
         let enable_mobs = match self.config.audio.provider.as_str() {
             "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "sovits-offline" => self.config.audio.sovits.clone().unwrap().enable_mobs,
             "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
             _ => true,
         };
@@ -790,7 +775,7 @@ mod tests {
         fs::create_dir_all(&chapter_build_dir)?;
         let segments_path = chapter_build_dir.join("segments.json");
         let cached_segments = vec![AudioSegment {
-            speaker: "Narrator".to_string(),
+            speaker: Some("Narrator".to_string()),
             text: "Audio".to_string(),
             style: None,
             voice_id: None,
@@ -863,7 +848,7 @@ mod tests {
         let segments_path = chapter_build_dir.join("segments.json");
 
         let cached_segments = vec![AudioSegment {
-            speaker: "Narrator".to_string(),
+            speaker: Some("Narrator".to_string()),
             text: "Cached audio".to_string(),
             style: None,
             voice_id: None,
@@ -1099,7 +1084,7 @@ mod tests {
                 *ex = excluded.to_vec();
 
                 // Verify Chapter Mob resolution
-                if segment.speaker == "章節路人(男)" {
+                if matches!(segment.speaker.as_deref(), Some("章節路人(男)")) {
                     let info = map.characters.get("章節路人(男)").unwrap();
                     assert_eq!(info.voice_id.as_deref(), Some("Voice_Mob_Male_Fixed"));
                 }

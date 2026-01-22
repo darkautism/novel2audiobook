@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioSegment {
     pub text: String,
-    pub speaker: String,
+    pub speaker: Option<String>,
     #[serde(default)]
     pub style: Option<String>,
     #[serde(default)]
@@ -144,11 +144,6 @@ impl AcgnaiScriptGenerator {
             "edge-tts" => config
                 .audio
                 .edge_tts
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
-            "sovits-offline" => config
-                .audio
-                .sovits
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
             "acgnai" => config

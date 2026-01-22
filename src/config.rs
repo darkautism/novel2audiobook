@@ -66,10 +66,6 @@ pub struct AudioConfig {
 
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
-
-    #[serde(rename = "sovits-offline")]
-    pub sovits: Option<SovitsConfig>,
-
     pub acgnai: Option<AcgnaiConfig>,
 }
 
@@ -83,20 +79,6 @@ pub struct EdgeTtsConfig {
 
     #[serde(default = "default_enable_mobs")]
     pub enable_mobs: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct SovitsConfig {
-    #[serde(default = "default_sovits_base_url")]
-    pub base_url: String,
-    #[serde(default = "default_sovits_voice_map")]
-    pub voice_map_path: String,
-
-    #[serde(default = "default_enable_mobs")]
-    pub enable_mobs: bool,
-    pub narrator_voice: Option<String>,
-    pub default_male_voice: Option<String>,
-    pub default_female_voice: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -154,12 +136,6 @@ fn default_retry_delay() -> u64 {
 }
 fn default_tts_provider() -> String {
     "edge-tts".to_string()
-}
-fn default_sovits_base_url() -> String {
-    "http://127.0.0.1:9880".to_string()
-}
-fn default_sovits_voice_map() -> String {
-    "sovits_voices.json".to_string()
 }
 
 fn default_acgnai_base_url() -> String {

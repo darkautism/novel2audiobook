@@ -7,7 +7,7 @@ use crate::tts::{
     TtsClient, Voice, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
     VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use serde_json::json;
@@ -182,9 +182,10 @@ impl TtsClient for AcgnaiClient {
 
         let voice_id = if let Some(vid) = &segment.voice_id {
             vid.clone()
+        } else if let Some(speaker) = &segment.speaker {
+            self.resolve_voice(speaker, char_map, excluded_voices).await?
         } else {
-            self.resolve_voice(&segment.speaker, char_map, excluded_voices)
-                .await?
+            panic!("No speaker or voice_id specified for segment");
         };
         let acgnai_config = self
             .config

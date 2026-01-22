@@ -220,8 +220,10 @@ impl TtsClient for EdgeTtsClient {
     ) -> Result<Vec<u8>> {
         let voice = if let Some(vid) = &segment.voice_id {
             vid.clone()
+        } else if let Some(speaker) = &segment.speaker {
+            self.resolve_voice(speaker, char_map, excluded_voices)
         } else {
-            self.resolve_voice(&segment.speaker, char_map, excluded_voices)
+            panic!("No speaker or voice_id specified for segment");
         };
         let using_style = self.config.audio.edge_tts.clone().unwrap_or_default().style;
         let ssml = match (using_style, &segment.style) {

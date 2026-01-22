@@ -45,10 +45,7 @@ pub async fn load_or_refresh_metadata(
         // 1. Fetch API
         let mut local_map: GptSovitsVoiceMap = HashMap::new();
         let client = reqwest::Client::new();
-        let url = config
-            .audio
-            .gpt_sovits
-            .clone().unwrap().base_url + "models/v4";
+        let url = config.audio.gpt_sovits.clone().unwrap().base_url + "models/v4";
 
         // If GPT-SoVITS is not configured or URL is empty, return empty map
         if url.is_empty() {
@@ -67,7 +64,10 @@ pub async fn load_or_refresh_metadata(
             req = req.header("Authorization", format!("Bearer {}", token));
         }
 
-        let resp = req.send().await.context("Failed to fetch GPT-SoVITS models")?;
+        let resp = req
+            .send()
+            .await
+            .context("Failed to fetch GPT-SoVITS models")?;
         let api_data: GptSovitsModelResponse = resp
             .json()
             .await

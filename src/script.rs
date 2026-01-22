@@ -139,22 +139,7 @@ pub struct GptSovitsScriptGenerator {
 }
 
 impl GptSovitsScriptGenerator {
-    pub fn new(config: &Config) -> Self {
-        let narrator_voice_id = match config.audio.provider.as_str() {
-            "edge-tts" => config
-                .audio
-                .edge_tts
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
-            "gpt_sovits" => config
-                .audio
-                .gpt_sovits
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
-            _ => None,
-        }
-        .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
-
+    pub fn new(narrator_voice_id: String) -> Self {
         Self { narrator_voice_id }
     }
 }

@@ -62,7 +62,7 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
                     needs_save = true;
                 }
             }
-        },
+        }
         "gpt_sovits" => {
             if config.audio.gpt_sovits.is_none() {
                 config.audio.gpt_sovits = Some(crate::config::GptSovitsConfig {
@@ -74,8 +74,6 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
                     speed_factor: 1,
                     repetition_penalty: 1.35,
                     narrator_voice: None,
-                    default_male_voice: None,
-                    default_female_voice: None,
                     ..Default::default()
                 });
             }
@@ -83,8 +81,6 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
             let setup_needed = {
                 let cfg = config.audio.gpt_sovits.as_ref().unwrap();
                 cfg.narrator_voice.is_none()
-                    || cfg.default_male_voice.is_none()
-                    || cfg.default_female_voice.is_none()
             };
 
             if setup_needed {
@@ -102,21 +98,6 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
                 if cfg.narrator_voice.is_none() {
                     cfg.narrator_voice =
                         Some(select_voice("Select Narrator Voice:", &voices, |_| true)?);
-                    needs_save = true;
-                }
-                if cfg.default_male_voice.is_none() {
-                    cfg.default_male_voice =
-                        Some(select_voice("Select Default Male Voice:", &voices, |v| {
-                            v.gender.eq_ignore_ascii_case("Male")
-                        })?);
-                    needs_save = true;
-                }
-                if cfg.default_female_voice.is_none() {
-                    cfg.default_female_voice = Some(select_voice(
-                        "Select Default Female Voice:",
-                        &voices,
-                        |v| v.gender.eq_ignore_ascii_case("Female"),
-                    )?);
                     needs_save = true;
                 }
             }

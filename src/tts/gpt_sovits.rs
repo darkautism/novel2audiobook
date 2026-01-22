@@ -1,7 +1,7 @@
-use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsVoiceMap};
 use crate::config::Config;
+use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsVoiceMap};
 use crate::llm::LlmClient;
-use crate::script::AudioSegment;
+use crate::script::{AudioSegment, GptSovitsScriptGenerator, ScriptGenerator};
 use crate::state::CharacterMap;
 use crate::tts::{
     TtsClient, Voice, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
@@ -135,21 +135,7 @@ impl GptSovitsClient {
                 }
             }
 
-            // 3. Gender default
-            match info.gender.to_lowercase().as_str() {
-                "male" => {
-                    if let Some(v) = &gpt_sovits_config.default_male_voice {
-                        return Ok(v.clone());
-                    }
-                }
-                "female" => {
-                    if let Some(v) = &gpt_sovits_config.default_female_voice {
-                        return Ok(v.clone());
-                    }
-                }
-                _ => {}
-            }
-
+            // 3. Gender default - REMOVED
             // Random based on gender
             return self.pick_random_voice(Some(&info.gender), excluded_voices);
         }
@@ -179,11 +165,11 @@ impl TtsClient for GptSovitsClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-
         let voice_id = if let Some(vid) = &segment.voice_id {
             vid.clone()
         } else if let Some(speaker) = &segment.speaker {
-            self.resolve_voice(speaker, char_map, excluded_voices).await?
+            self.resolve_voice(speaker, char_map, excluded_voices)
+                .await?
         } else {
             panic!("No speaker or voice_id specified for segment");
         };
@@ -224,10 +210,15 @@ impl TtsClient for GptSovitsClient {
         let mut retry = gpt_sovits_config.retry;
         let mut download_url = String::new();
         while retry > 0 {
-            let mut req = client.post(&format!("{}infer_single", gpt_sovits_config.base_url)).json(&payload);
+            let mut req = client
+                .post(&format!("{}infer_single", gpt_sovits_config.base_url))
+                .json(&payload);
 
             if !gpt_sovits_config.token.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", gpt_sovits_config.token));
+                req = req.header(
+                    "Authorization",
+                    format!("Bearer {}", gpt_sovits_config.token),
+                );
             }
             let resp = req.send().await?;
             if !resp.status().is_success() {
@@ -250,8 +241,7 @@ impl TtsClient for GptSovitsClient {
                 } else {
                     println!(
                         "GPT-SoVITS synthesis failed: {}, retrying...\nPayload: {:?}",
-                        payload,
-                        download_response.msg
+                        payload, download_response.msg
                     );
                     retry -= 1;
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -266,10 +256,7 @@ impl TtsClient for GptSovitsClient {
         let wav_resp = client.get(&download_url).send().await?;
         let wav_bytes = wav_resp.bytes().await?;
 
-        println!(
-            "GPT-SoVITS synthesis completed: {} bytes",
-            wav_bytes.len()
-        );
+        println!("GPT-SoVITS synthesis completed: {} bytes", wav_bytes.len());
 
         Ok(wav_bytes.into())
     }
@@ -280,5 +267,42 @@ impl TtsClient for GptSovitsClient {
         excluded_voices: &[String],
     ) -> Result<String> {
         self.pick_random_voice(gender, excluded_voices)
+    }
+
+    fn get_narrator_voice_id(&self) -> String {
+        self.config
+            .audio
+            .gpt_sovits
+            .as_ref()
+            .and_then(|c| c.narrator_voice.clone())
+            .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
+    }
+
+    fn is_mob_enabled(&self) -> bool {
+        self.config
+            .audio
+            .gpt_sovits
+            .as_ref()
+            .map(|c| c.enable_mobs)
+            .unwrap_or(true)
+    }
+
+    fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String {
+        voices
+            .iter()
+            .map(|v| {
+                format!(
+                    "{{ \"id\": \"{}\", \"gender\": \"{}\", \"info\": \"{}\" }}",
+                    v.short_name,
+                    v.gender,
+                    v.friendly_name.as_deref().unwrap_or("")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
+        Box::new(GptSovitsScriptGenerator::new(self.get_narrator_voice_id()))
     }
 }

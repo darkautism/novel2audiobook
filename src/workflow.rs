@@ -1,9 +1,6 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::script::{
-    strip_code_blocks, GptSovitsScriptGenerator, AudioSegment, JsonScriptGenerator,
-    PlainScriptGenerator, ScriptGenerator,
-};
+use crate::script::{strip_code_blocks, AudioSegment, PlainScriptGenerator, ScriptGenerator};
 use crate::state::{CharacterInfo, CharacterMap, WorkflowState};
 use crate::tts::{
     TtsClient, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
@@ -31,11 +28,7 @@ impl WorkflowManager {
         let state = Self::load_state(&config.build_folder)?;
         let mut character_map = Self::load_character_map(&config.build_folder)?;
 
-        let enable_mobs = match config.audio.provider.as_str() {
-            "edge-tts" => config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "gpt_sovits" => config.audio.gpt_sovits.clone().unwrap().enable_mobs,
-            _ => true,
-        };
+        let enable_mobs = tts.is_mob_enabled();
 
         // Ensure mob characters exist (Only if enabled)
         if enable_mobs {
@@ -112,11 +105,7 @@ impl WorkflowManager {
             }
         }
 
-        let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
-            "edge-tts" => Box::new(JsonScriptGenerator::new(&config)),
-            "gpt_sovits" => Box::new(GptSovitsScriptGenerator::new(&config)),
-            _ => Box::new(PlainScriptGenerator::new()),
-        };
+        let script_generator = tts.get_script_generator();
 
         Ok(Self {
             config,
@@ -247,54 +236,9 @@ impl WorkflowManager {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let voice_list_str = if self.config.audio.provider == "gpt_sovits" {
-                voices
-                    .iter()
-                    .map(|v| {
-                        format!(
-                            "{{ \"id\": \"{}\", \"gender\": \"{}\", \"info\": \"{}\" }}",
-                            v.short_name,
-                            v.gender,
-                            v.friendly_name.as_deref().unwrap_or("")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                voices
-                    .iter()
-                    .map(|v| {
-                        format!(
-                            "{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}",
-                            v.short_name, v.gender, v.locale
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-
-            let narrator_voice_id = match self.config.audio.provider.as_str() {
-                "edge-tts" => self
-                    .config
-                    .audio
-                    .edge_tts
-                    .as_ref()
-                    .and_then(|c| c.narrator_voice.clone()),
-                "gpt_sovits" => self
-                    .config
-                    .audio
-                    .gpt_sovits
-                    .as_ref()
-                    .and_then(|c| c.narrator_voice.clone()),
-                _ => None,
-            }
-            .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
-
-            let enable_mobs = match self.config.audio.provider.as_str() {
-                "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-                "gpt_sovits" => self.config.audio.gpt_sovits.clone().unwrap().enable_mobs,
-                _ => true,
-            };
+            let voice_list_str = self.tts.format_voice_list_for_analysis(&voices);
+            let narrator_voice_id = self.tts.get_narrator_voice_id();
+            let enable_mobs = self.tts.is_mob_enabled();
 
             let mob_instruction = if enable_mobs {
                 "- 系統已內建路人、路人(男)、路人(女)、章節路人(男)、章節路人(女)等角色，請勿重複創建。\n\
@@ -480,22 +424,7 @@ impl WorkflowManager {
 
         // Build Excluded Voices (Narrator + Protagonists)
         let mut excluded_voices = Vec::new();
-        let narrator_voice_id = match self.config.audio.provider.as_str() {
-            "edge-tts" => self
-                .config
-                .audio
-                .edge_tts
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
-            "gpt_sovits" => self
-                .config
-                .audio
-                .gpt_sovits
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone()),
-            _ => None,
-        }
-        .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string());
+        let narrator_voice_id = self.tts.get_narrator_voice_id();
 
         excluded_voices.push(narrator_voice_id);
 
@@ -519,11 +448,7 @@ impl WorkflowManager {
         // Note: Chapter Mobs (placeholders) are in global map if enable_mobs=true.
         let mut working_map = self.character_map.clone();
 
-        let enable_mobs = match self.config.audio.provider.as_str() {
-            "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "gpt_sovits" => self.config.audio.gpt_sovits.clone().unwrap().enable_mobs,
-            _ => true,
-        };
+        let enable_mobs = self.tts.is_mob_enabled();
 
         // Resolve Standard Chapter Mobs (if enabled)
         if enable_mobs {
@@ -591,6 +516,7 @@ impl WorkflowManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::script::JsonScriptGenerator;
     use async_trait::async_trait;
     use std::fs;
     use std::path::Path;
@@ -634,6 +560,24 @@ mod tests {
         }
     }
 
+    fn dummy_config() -> Config {
+        Config {
+            input_folder: "".to_string(),
+            output_folder: "".to_string(),
+            build_folder: "".to_string(),
+            unattended: false,
+            llm: crate::config::LlmConfig {
+                provider: "mock".to_string(),
+                retry_count: 0,
+                retry_delay_seconds: 0,
+                gemini: None,
+                ollama: None,
+                openai: None,
+            },
+            audio: crate::config::AudioConfig::default(),
+        }
+    }
+
     struct MockTtsClient {
         should_fail: bool,
     }
@@ -661,6 +605,18 @@ mod tests {
             _excluded_voices: &[String],
         ) -> Result<String> {
             Ok("mock_voice_id".to_string())
+        }
+        fn get_narrator_voice_id(&self) -> String {
+            "mock_narrator".to_string()
+        }
+        fn is_mob_enabled(&self) -> bool {
+            true
+        }
+        fn format_voice_list_for_analysis(&self, _voices: &[crate::tts::Voice]) -> String {
+            "mock voice list".to_string()
+        }
+        fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
+            Box::new(JsonScriptGenerator::new(&dummy_config()))
         }
     }
 
@@ -961,6 +917,25 @@ mod tests {
             async fn get_random_voice(&self, _: Option<&str>, _: &[String]) -> Result<String> {
                 Ok("mock".to_string())
             }
+            fn get_narrator_voice_id(&self) -> String {
+                "mock_narrator".to_string()
+            }
+            fn is_mob_enabled(&self) -> bool {
+                true
+            }
+            fn format_voice_list_for_analysis(&self, voices: &[crate::tts::Voice]) -> String {
+                // Return specific format to verify test expectations if needed, or just a mock
+                // The test checks if specific voice names are in the prompt.
+                // The `format_voice_list_for_analysis` should return string containing voice names.
+                voices
+                    .iter()
+                    .map(|v| v.short_name.clone())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+            fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
+                Box::new(PlainScriptGenerator::new())
+            }
         }
 
         let voices = vec![
@@ -1110,6 +1085,18 @@ mod tests {
                 } else {
                     Ok("Voice_Mob_Female_Fixed".to_string())
                 }
+            }
+            fn get_narrator_voice_id(&self) -> String {
+                "Voice_Narrator".to_string()
+            }
+            fn is_mob_enabled(&self) -> bool {
+                true
+            }
+            fn format_voice_list_for_analysis(&self, _voices: &[crate::tts::Voice]) -> String {
+                "".to_string()
+            }
+            fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
+                Box::new(JsonScriptGenerator::new(&dummy_config()))
             }
         }
 

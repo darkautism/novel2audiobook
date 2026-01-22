@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::script::AudioSegment;
+use crate::script::{AudioSegment, JsonScriptGenerator, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -251,6 +251,41 @@ impl TtsClient for EdgeTtsClient {
         excluded_voices: &[String],
     ) -> Result<String> {
         Ok(self.pick_random_voice(gender, excluded_voices))
+    }
+
+    fn get_narrator_voice_id(&self) -> String {
+        self.config
+            .audio
+            .edge_tts
+            .as_ref()
+            .and_then(|c| c.narrator_voice.clone())
+            .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
+    }
+
+    fn is_mob_enabled(&self) -> bool {
+        self.config
+            .audio
+            .edge_tts
+            .as_ref()
+            .map(|c| c.enable_mobs)
+            .unwrap_or(true)
+    }
+
+    fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String {
+        voices
+            .iter()
+            .map(|v| {
+                format!(
+                    "{{ \"id\": \"{}\", \"gender\": \"{}\", \"locale\": \"{}\" }}",
+                    v.short_name, v.gender, v.locale
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
+        Box::new(JsonScriptGenerator::new(&self.config))
     }
 }
 

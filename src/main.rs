@@ -1,5 +1,5 @@
-mod gpt_sovits;
 mod config;
+mod gpt_sovits;
 mod llm;
 mod script;
 mod setup;

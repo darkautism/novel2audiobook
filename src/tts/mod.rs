@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::script::AudioSegment;
+use crate::script::{AudioSegment, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -41,6 +41,11 @@ pub trait TtsClient: Send + Sync {
     async fn get_voice_styles(&self, _voice_id: &str) -> Result<Vec<String>> {
         Ok(Vec::new())
     }
+
+    fn get_narrator_voice_id(&self) -> String;
+    fn is_mob_enabled(&self) -> bool;
+    fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String;
+    fn get_script_generator(&self) -> Box<dyn ScriptGenerator>;
 }
 
 pub async fn fetch_voice_list(
@@ -63,13 +68,15 @@ pub async fn create_tts_client(
 ) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
-        "gpt_sovits" => Ok(Box::new(gpt_sovits::GptSovitsClient::new(config, llm).await?)),
+        "gpt_sovits" => Ok(Box::new(
+            gpt_sovits::GptSovitsClient::new(config, llm).await?,
+        )),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
 
-pub mod gpt_sovits;
 pub mod edge;
+pub mod gpt_sovits;
 
 #[cfg(test)]
 mod tests {

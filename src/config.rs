@@ -90,7 +90,7 @@ pub struct GptSovitsConfig {
 
     #[serde(default = "default_enable_mobs")]
     pub enable_mobs: bool,
-    
+
     #[serde(default = "default_gpt_sovits_base_url")]
     pub base_url: String,
 
@@ -106,8 +106,6 @@ pub struct GptSovitsConfig {
     pub repetition_penalty: f64,
 
     pub narrator_voice: Option<String>,
-    pub default_male_voice: Option<String>,
-    pub default_female_voice: Option<String>,
 }
 
 fn default_input() -> String {

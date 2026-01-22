@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::script::{
-    strip_code_blocks, AcgnaiScriptGenerator, AudioSegment, JsonScriptGenerator,
+    strip_code_blocks, GptSovitsScriptGenerator, AudioSegment, JsonScriptGenerator,
     PlainScriptGenerator, ScriptGenerator,
 };
 use crate::state::{CharacterInfo, CharacterMap, WorkflowState};
@@ -33,7 +33,7 @@ impl WorkflowManager {
 
         let enable_mobs = match config.audio.provider.as_str() {
             "edge-tts" => config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "acgnai" => config.audio.acgnai.clone().unwrap().enable_mobs,
+            "gpt_sovits" => config.audio.gpt_sovits.clone().unwrap().enable_mobs,
             _ => true,
         };
 
@@ -114,7 +114,7 @@ impl WorkflowManager {
 
         let script_generator: Box<dyn ScriptGenerator> = match config.audio.provider.as_str() {
             "edge-tts" => Box::new(JsonScriptGenerator::new(&config)),
-            "acgnai" => Box::new(AcgnaiScriptGenerator::new(&config)),
+            "gpt_sovits" => Box::new(GptSovitsScriptGenerator::new(&config)),
             _ => Box::new(PlainScriptGenerator::new()),
         };
 
@@ -247,7 +247,7 @@ impl WorkflowManager {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let voice_list_str = if self.config.audio.provider == "acgnai" {
+            let voice_list_str = if self.config.audio.provider == "gpt_sovits" {
                 voices
                     .iter()
                     .map(|v| {
@@ -280,10 +280,10 @@ impl WorkflowManager {
                     .edge_tts
                     .as_ref()
                     .and_then(|c| c.narrator_voice.clone()),
-                "acgnai" => self
+                "gpt_sovits" => self
                     .config
                     .audio
-                    .acgnai
+                    .gpt_sovits
                     .as_ref()
                     .and_then(|c| c.narrator_voice.clone()),
                 _ => None,
@@ -292,7 +292,7 @@ impl WorkflowManager {
 
             let enable_mobs = match self.config.audio.provider.as_str() {
                 "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-                "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
+                "gpt_sovits" => self.config.audio.gpt_sovits.clone().unwrap().enable_mobs,
                 _ => true,
             };
 
@@ -434,8 +434,8 @@ impl WorkflowManager {
                     }
                 }
             }
-            // For Acgnai, populate styles for ALL available voices (candidates) so ScriptGenerator can use them
-            if self.config.audio.provider == "acgnai" {
+            // For GPT-SoVITS, populate styles for ALL available voices (candidates) so ScriptGenerator can use them
+            if self.config.audio.provider == "gpt_sovits" {
                 for v in &voices {
                     if !voice_styles.contains_key(&v.short_name) {
                         if let Ok(styles) = self.tts.get_voice_styles(&v.short_name).await {
@@ -487,10 +487,10 @@ impl WorkflowManager {
                 .edge_tts
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
-            "acgnai" => self
+            "gpt_sovits" => self
                 .config
                 .audio
-                .acgnai
+                .gpt_sovits
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
             _ => None,
@@ -513,7 +513,7 @@ impl WorkflowManager {
         // Since we didn't save local map, if we just loaded segments, we only have global map.
         // If segment has voice_id, we use it.
         // If segment uses a local mob name but no voice_id... we have a problem if we didn't regenerate.
-        // But `AcgnaiScriptGenerator` is instructed to output `voice_id`.
+        // But `GptSovitsScriptGenerator` is instructed to output `voice_id`.
 
         // Let's create a working map, defaulting to global.
         // Note: Chapter Mobs (placeholders) are in global map if enable_mobs=true.
@@ -521,7 +521,7 @@ impl WorkflowManager {
 
         let enable_mobs = match self.config.audio.provider.as_str() {
             "edge-tts" => self.config.audio.edge_tts.clone().unwrap().enable_mobs,
-            "acgnai" => self.config.audio.acgnai.clone().unwrap().enable_mobs,
+            "gpt_sovits" => self.config.audio.gpt_sovits.clone().unwrap().enable_mobs,
             _ => true,
         };
 
@@ -694,6 +694,7 @@ mod tests {
             },
             audio: crate::config::AudioConfig {
                 provider: "edge-tts".to_string(),
+                edge_tts: Some(Default::default()),
                 ..crate::config::AudioConfig::default()
             },
         };
@@ -762,6 +763,7 @@ mod tests {
             },
             audio: crate::config::AudioConfig {
                 provider: "edge-tts".to_string(),
+                edge_tts: Some(Default::default()),
                 ..crate::config::AudioConfig::default()
             },
         };
@@ -835,6 +837,7 @@ mod tests {
             },
             audio: crate::config::AudioConfig {
                 provider: "edge-tts".to_string(),
+                edge_tts: Some(Default::default()),
                 ..crate::config::AudioConfig::default()
             },
         };
@@ -911,6 +914,7 @@ mod tests {
                 provider: "edge-tts".to_string(),
                 language: "zh".to_string(),
                 exclude_locales: vec!["zh-HK".to_string()],
+                edge_tts: Some(Default::default()),
                 ..crate::config::AudioConfig::default()
             },
         };
@@ -1033,6 +1037,7 @@ mod tests {
                 provider: "edge-tts".to_string(),
                 edge_tts: Some(crate::config::EdgeTtsConfig {
                     narrator_voice: Some("Voice_Narrator".to_string()),
+                    enable_mobs: true,
                     ..Default::default()
                 }),
                 ..Default::default()

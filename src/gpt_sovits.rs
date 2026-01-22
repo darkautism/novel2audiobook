@@ -7,18 +7,18 @@ use std::path::Path;
 use tokio::fs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AcgnaiVoiceMetadata {
+pub struct GptSovitsVoiceMetadata {
     pub gender: String, // "Male", "Female", "Neutral"
     pub tags: Vec<String>,
     pub emotion: Vec<String>,
 }
 
 // Map from Model Name -> Metadata
-pub type AcgnaiVoiceMap = HashMap<String, AcgnaiVoiceMetadata>;
+pub type GptSovitsVoiceMap = HashMap<String, GptSovitsVoiceMetadata>;
 
 // API Response Structs
 #[derive(Debug, Deserialize)]
-struct AcgnaiModelResponse {
+struct GptSovitsModelResponse {
     #[allow(dead_code)]
     msg: String,
     models: HashMap<String, HashMap<String, Vec<String>>>,
@@ -33,31 +33,31 @@ struct LlmVoiceInfo {
 pub async fn load_or_refresh_metadata(
     config: &Config,
     llm: Option<&Box<dyn LlmClient>>,
-) -> Result<AcgnaiVoiceMap> {
-    let url = url::Url::parse(&config.audio.acgnai.as_ref().unwrap().base_url.clone()).unwrap();
+) -> Result<GptSovitsVoiceMap> {
+    let url = url::Url::parse(&config.audio.gpt_sovits.as_ref().unwrap().base_url.clone()).unwrap();
     let filename = url.host_str().unwrap_or("").to_string() + ".json";
     let file_path = Path::new(&filename);
-    let local_map: AcgnaiVoiceMap = if file_path.exists() {
+    let local_map: GptSovitsVoiceMap = if file_path.exists() {
         let content = fs::read_to_string(&file_path).await?;
         serde_json::from_str(&content).unwrap_or_default()
     } else {
         // 沒有舊檔，製作新檔
         // 1. Fetch API
-        let mut local_map: AcgnaiVoiceMap = HashMap::new();
+        let mut local_map: GptSovitsVoiceMap = HashMap::new();
         let client = reqwest::Client::new();
         let url = config
             .audio
-            .acgnai
+            .gpt_sovits
             .clone().unwrap().base_url + "models/v4";
 
-        // If ACGNAI is not configured or URL is empty, return empty map
+        // If GPT-SoVITS is not configured or URL is empty, return empty map
         if url.is_empty() {
             return Ok(HashMap::new());
         }
 
         let token = config
             .audio
-            .acgnai
+            .gpt_sovits
             .as_ref()
             .map(|c| c.token.clone())
             .unwrap_or_default();
@@ -67,11 +67,11 @@ pub async fn load_or_refresh_metadata(
             req = req.header("Authorization", format!("Bearer {}", token));
         }
 
-        let resp = req.send().await.context("Failed to fetch Acgnai models")?;
-        let api_data: AcgnaiModelResponse = resp
+        let resp = req.send().await.context("Failed to fetch GPT-SoVITS models")?;
+        let api_data: GptSovitsModelResponse = resp
             .json()
             .await
-            .context("Failed to parse Acgnai models JSON")?;
+            .context("Failed to parse GPT-SoVITS models JSON")?;
 
         let new_models = api_data
             .models
@@ -80,7 +80,7 @@ pub async fn load_or_refresh_metadata(
             .cloned()
             .collect::<Vec<String>>();
         if let Some(llm_client) = llm {
-            println!("Classifying Acgnai voices via LLM...");
+            println!("Classifying GPT-SoVITS voices via LLM...");
             // Process in chunks
             for chunk in new_models.chunks(500) {
                 let prompt = format!(
@@ -109,7 +109,7 @@ pub async fn load_or_refresh_metadata(
                                     if let Some(langs) = api_data.models.get(&name) {
                                         local_map.insert(
                                             name.clone(),
-                                            AcgnaiVoiceMetadata {
+                                            GptSovitsVoiceMetadata {
                                                 gender: info.gender,
                                                 tags: info.tags,
                                                 emotion: langs
@@ -136,7 +136,7 @@ pub async fn load_or_refresh_metadata(
                 if let Some(langs) = api_data.models.get(&name) {
                     local_map.insert(
                         name.clone(),
-                        AcgnaiVoiceMetadata {
+                        GptSovitsVoiceMetadata {
                             gender: "Female".to_string(),
                             tags: vec![],
                             emotion: langs.values().cloned().flatten().collect(),

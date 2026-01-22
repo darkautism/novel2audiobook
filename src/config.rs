@@ -66,7 +66,7 @@ pub struct AudioConfig {
 
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
-    pub acgnai: Option<AcgnaiConfig>,
+    pub gpt_sovits: Option<GptSovitsConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -82,7 +82,7 @@ pub struct EdgeTtsConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct AcgnaiConfig {
+pub struct GptSovitsConfig {
     pub token: String,
 
     #[serde(default)]
@@ -91,18 +91,18 @@ pub struct AcgnaiConfig {
     #[serde(default = "default_enable_mobs")]
     pub enable_mobs: bool,
     
-    #[serde(default = "default_acgnai_base_url")]
+    #[serde(default = "default_gpt_sovits_base_url")]
     pub base_url: String,
 
-    #[serde(default = "default_acgnai_top_k")]
+    #[serde(default = "default_gpt_sovits_top_k")]
     pub top_k: i32,
-    #[serde(default = "default_acgnai_top_p")]
+    #[serde(default = "default_gpt_sovits_top_p")]
     pub top_p: u8,
-    #[serde(default = "default_acgnai_temperature")]
+    #[serde(default = "default_gpt_sovits_temperature")]
     pub temperature: u8,
-    #[serde(default = "default_acgnai_speed_factor")]
+    #[serde(default = "default_gpt_sovits_speed_factor")]
     pub speed_factor: u8,
-    #[serde(default = "default_acgnai_repetition_penalty")]
+    #[serde(default = "default_gpt_sovits_repetition_penalty")]
     pub repetition_penalty: f64,
 
     pub narrator_voice: Option<String>,
@@ -138,23 +138,23 @@ fn default_tts_provider() -> String {
     "edge-tts".to_string()
 }
 
-fn default_acgnai_base_url() -> String {
+fn default_gpt_sovits_base_url() -> String {
     "https://gsv2p.acgnai.top/".to_string()
 }
 
-fn default_acgnai_top_k() -> i32 {
+fn default_gpt_sovits_top_k() -> i32 {
     10
 }
-fn default_acgnai_top_p() -> u8 {
+fn default_gpt_sovits_top_p() -> u8 {
     1
 }
-fn default_acgnai_temperature() -> u8 {
+fn default_gpt_sovits_temperature() -> u8 {
     1
 }
-fn default_acgnai_speed_factor() -> u8 {
+fn default_gpt_sovits_speed_factor() -> u8 {
     1
 }
-fn default_acgnai_repetition_penalty() -> f64 {
+fn default_gpt_sovits_repetition_penalty() -> f64 {
     1.35
 }
 

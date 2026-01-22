@@ -26,7 +26,7 @@ audio:
     default_male_voice: zh-TW-YunJheNeural
     default_female_voice: zh-TW-HsiaoYuNeural
     style: false
-  acgnai:
+  gpt_sovits:
     token: YourAPIKEY
     enable_mobs: false
     retry: 5

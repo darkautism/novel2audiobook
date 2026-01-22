@@ -63,9 +63,9 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
                 }
             }
         },
-        "acgnai" => {
-            if config.audio.acgnai.is_none() {
-                config.audio.acgnai = Some(crate::config::AcgnaiConfig {
+        "gpt_sovits" => {
+            if config.audio.gpt_sovits.is_none() {
+                config.audio.gpt_sovits = Some(crate::config::GptSovitsConfig {
                     token: "".to_string(),
                     base_url: "https://gsv2p.acgnai.top/".to_string(),
                     top_k: 10,
@@ -81,23 +81,23 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
             }
 
             let setup_needed = {
-                let cfg = config.audio.acgnai.as_ref().unwrap();
+                let cfg = config.audio.gpt_sovits.as_ref().unwrap();
                 cfg.narrator_voice.is_none()
                     || cfg.default_male_voice.is_none()
                     || cfg.default_female_voice.is_none()
             };
 
             if setup_needed {
-                println!("Fetching Acgnai models...");
+                println!("Fetching GPT-SoVITS models...");
                 let voices = fetch_voice_list(config, llm).await?;
 
                 if voices.is_empty() {
                     return Err(anyhow!(
-                        "No Acgnai models found. Please check internet connection or config."
+                        "No GPT-SoVITS models found. Please check internet connection or config."
                     ));
                 }
 
-                let cfg = config.audio.acgnai.as_mut().unwrap();
+                let cfg = config.audio.gpt_sovits.as_mut().unwrap();
 
                 if cfg.narrator_voice.is_none() {
                     cfg.narrator_voice =

@@ -1,4 +1,4 @@
-mod acgnai;
+mod gpt_sovits;
 mod config;
 mod llm;
 mod script;

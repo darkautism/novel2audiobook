@@ -134,11 +134,11 @@ impl ScriptGenerator for JsonScriptGenerator {
     }
 }
 
-pub struct AcgnaiScriptGenerator {
+pub struct GptSovitsScriptGenerator {
     narrator_voice_id: String,
 }
 
-impl AcgnaiScriptGenerator {
+impl GptSovitsScriptGenerator {
     pub fn new(config: &Config) -> Self {
         let narrator_voice_id = match config.audio.provider.as_str() {
             "edge-tts" => config
@@ -146,9 +146,9 @@ impl AcgnaiScriptGenerator {
                 .edge_tts
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
-            "acgnai" => config
+            "gpt_sovits" => config
                 .audio
-                .acgnai
+                .gpt_sovits
                 .as_ref()
                 .and_then(|c| c.narrator_voice.clone()),
             _ => None,
@@ -159,7 +159,7 @@ impl AcgnaiScriptGenerator {
     }
 }
 
-impl ScriptGenerator for AcgnaiScriptGenerator {
+impl ScriptGenerator for GptSovitsScriptGenerator {
     fn get_system_prompt(&self) -> String {
         "你是一個有聲書腳本生成器。請將小說文本轉換為結構化的腳本 JSON。".to_string()
     }

@@ -1,4 +1,4 @@
-use crate::acgnai::{load_or_refresh_metadata, AcgnaiVoiceMap};
+use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsVoiceMap};
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::script::AudioSegment;
@@ -13,7 +13,7 @@ use rand::seq::IndexedRandom;
 use serde_json::json;
 
 #[derive(serde::Deserialize)]
-struct AcgnaiDownloadResponse {
+struct GptSovitsDownloadResponse {
     msg: String,
     audio_url: String,
 }
@@ -23,7 +23,7 @@ pub async fn list_voices(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> R
     Ok(metadata_to_voices(&metadata))
 }
 
-fn metadata_to_voices(metadata: &AcgnaiVoiceMap) -> Vec<Voice> {
+fn metadata_to_voices(metadata: &GptSovitsVoiceMap) -> Vec<Voice> {
     metadata
         .iter()
         .map(|(name, meta)| Voice {
@@ -36,12 +36,12 @@ fn metadata_to_voices(metadata: &AcgnaiVoiceMap) -> Vec<Voice> {
         .collect()
 }
 
-pub struct AcgnaiClient {
+pub struct GptSovitsClient {
     config: Config,
-    metadata: AcgnaiVoiceMap,
+    metadata: GptSovitsVoiceMap,
 }
 
-impl AcgnaiClient {
+impl GptSovitsClient {
     pub async fn new(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Self> {
         let metadata = load_or_refresh_metadata(config, llm).await?;
 
@@ -90,7 +90,7 @@ impl AcgnaiClient {
                     .keys()
                     .next()
                     .cloned()
-                    .ok_or_else(|| anyhow!("No Acgnai voices available"))
+                    .ok_or_else(|| anyhow!("No GPT-SoVITS voices available"))
             }
         }
     }
@@ -101,16 +101,16 @@ impl AcgnaiClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<String> {
-        let acgnai_config = self
+        let gpt_sovits_config = self
             .config
             .audio
-            .acgnai
+            .gpt_sovits
             .as_ref()
-            .ok_or_else(|| anyhow!("Acgnai config missing"))?;
+            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
 
         // 1. Narrator
         if speaker == "旁白" || speaker.eq_ignore_ascii_case("Narrator") {
-            if let Some(v) = &acgnai_config.narrator_voice {
+            if let Some(v) = &gpt_sovits_config.narrator_voice {
                 return Ok(v.clone());
             }
             // If no narrator set, use random female?
@@ -138,12 +138,12 @@ impl AcgnaiClient {
             // 3. Gender default
             match info.gender.to_lowercase().as_str() {
                 "male" => {
-                    if let Some(v) = &acgnai_config.default_male_voice {
+                    if let Some(v) = &gpt_sovits_config.default_male_voice {
                         return Ok(v.clone());
                     }
                 }
                 "female" => {
-                    if let Some(v) = &acgnai_config.default_female_voice {
+                    if let Some(v) = &gpt_sovits_config.default_female_voice {
                         return Ok(v.clone());
                     }
                 }
@@ -160,7 +160,7 @@ impl AcgnaiClient {
 }
 
 #[async_trait]
-impl TtsClient for AcgnaiClient {
+impl TtsClient for GptSovitsClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
         Ok(metadata_to_voices(&self.metadata))
     }
@@ -187,12 +187,12 @@ impl TtsClient for AcgnaiClient {
         } else {
             panic!("No speaker or voice_id specified for segment");
         };
-        let acgnai_config = self
+        let gpt_sovits_config = self
             .config
             .audio
-            .acgnai
+            .gpt_sovits
             .as_ref()
-            .ok_or_else(|| anyhow!("Acgnai config missing"))?;
+            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
 
         let payload = json!({
           "batch_size": 10,
@@ -204,52 +204,52 @@ impl TtsClient for AcgnaiClient {
           "model_name": voice_id,
           "parallel_infer": true,
           "prompt_text_lang": "中文",
-          "repetition_penalty": acgnai_config.repetition_penalty,
+          "repetition_penalty": gpt_sovits_config.repetition_penalty,
           "sample_steps": 16,
           "seed": format!("{}", rand::random::<u32>()),
-          "speed_facter": acgnai_config.speed_factor,
+          "speed_facter": gpt_sovits_config.speed_factor,
           "split_bucket": true,
           "version": "v4",
           "text": segment.text,
           "text_lang": "中文",
-          "top_k": acgnai_config.top_k,
-          "top_p": acgnai_config.top_p,
-          "temperature": acgnai_config.temperature,
+          "top_k": gpt_sovits_config.top_k,
+          "top_p": gpt_sovits_config.top_p,
+          "temperature": gpt_sovits_config.temperature,
           "text_split_method": "按标点符号切",
           //"text_split_method": "凑四句一切",
         });
 
         let client = reqwest::Client::new();
 
-        let mut retry = acgnai_config.retry;
+        let mut retry = gpt_sovits_config.retry;
         let mut download_url = String::new();
         while retry > 0 {
-            let mut req = client.post(&format!("{}infer_single", acgnai_config.base_url)).json(&payload);
+            let mut req = client.post(&format!("{}infer_single", gpt_sovits_config.base_url)).json(&payload);
 
-            if !acgnai_config.token.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", acgnai_config.token));
+            if !gpt_sovits_config.token.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", gpt_sovits_config.token));
             }
             let resp = req.send().await?;
             if !resp.status().is_success() {
                 let txt = resp.text().await?;
-                return Err(anyhow!("Acgnai synthesis failed: {}", txt));
+                return Err(anyhow!("GPT-SoVITS synthesis failed: {}", txt));
             }
 
             let body_text = resp.text().await?;
 
             // Handle cases where it might be quoted
             let response = body_text.trim().trim_matches('"').to_string();
-            let download_response: AcgnaiDownloadResponse =
+            let download_response: GptSovitsDownloadResponse =
                 serde_json::from_str(&response).unwrap();
             if download_response.msg != "合成成功" {
                 if retry == 1 {
                     return Err(anyhow!(
-                        "Acgnai synthesis failed: {}",
+                        "GPT-SoVITS synthesis failed: {}",
                         download_response.msg
                     ));
                 } else {
                     println!(
-                        "Acgnai synthesis failed: {}, retrying...\nPayload: {:?}",
+                        "GPT-SoVITS synthesis failed: {}, retrying...\nPayload: {:?}",
                         payload,
                         download_response.msg
                     );
@@ -267,7 +267,7 @@ impl TtsClient for AcgnaiClient {
         let wav_bytes = wav_resp.bytes().await?;
 
         println!(
-            "Acgnai synthesis completed: {} bytes",
+            "GPT-SoVITS synthesis completed: {} bytes",
             wav_bytes.len()
         );
 

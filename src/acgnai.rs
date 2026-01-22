@@ -34,7 +34,9 @@ pub async fn load_or_refresh_metadata(
     config: &Config,
     llm: Option<&Box<dyn LlmClient>>,
 ) -> Result<AcgnaiVoiceMap> {
-    let file_path = Path::new("acgnai-voice.json");
+    let url = url::Url::parse(&config.audio.acgnai.as_ref().unwrap().base_url.clone()).unwrap();
+    let filename = url.host_str().unwrap_or("").to_string() + ".json";
+    let file_path = Path::new(&filename);
     let local_map: AcgnaiVoiceMap = if file_path.exists() {
         let content = fs::read_to_string(&file_path).await?;
         serde_json::from_str(&content).unwrap_or_default()
@@ -46,9 +48,7 @@ pub async fn load_or_refresh_metadata(
         let url = config
             .audio
             .acgnai
-            .as_ref()
-            .map(|c| c.model_list_url.clone())
-            .unwrap_or_default();
+            .clone().unwrap().base_url + "models/v4";
 
         // If ACGNAI is not configured or URL is empty, return empty map
         if url.is_empty() {
@@ -149,7 +149,7 @@ pub async fn load_or_refresh_metadata(
         // Save
         let content = serde_json::to_string_pretty(&local_map)?;
         fs::write(&file_path, content).await?;
-        println!("Updated acgnai-voice.json");
+        println!("Updated {}", file_path.display());
         local_map
     };
 

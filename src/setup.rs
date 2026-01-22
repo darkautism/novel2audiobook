@@ -119,13 +119,11 @@ pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) ->
             if config.audio.acgnai.is_none() {
                 config.audio.acgnai = Some(crate::config::AcgnaiConfig {
                     token: "".to_string(),
-                    concurrency: 5,
-                    model_list_url: "https://gsv2p.acgnai.top/models/v4".to_string(),
-                    infer_url: "https://gsv2p.acgnai.top/infer_single".to_string(),
+                    base_url: "https://gsv2p.acgnai.top/".to_string(),
                     top_k: 10,
-                    top_p: 1.0,
-                    temperature: 1.0,
-                    speed_factor: 1.0,
+                    top_p: 1,
+                    temperature: 1,
+                    speed_factor: 1,
                     repetition_penalty: 1.35,
                     narrator_voice: None,
                     default_male_voice: None,

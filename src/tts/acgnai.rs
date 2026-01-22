@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use serde_json::json;
-use tokio::sync::Semaphore;
 
 #[derive(serde::Deserialize)]
 struct AcgnaiDownloadResponse {
@@ -40,23 +39,15 @@ fn metadata_to_voices(metadata: &AcgnaiVoiceMap) -> Vec<Voice> {
 pub struct AcgnaiClient {
     config: Config,
     metadata: AcgnaiVoiceMap,
-    semaphore: Semaphore,
 }
 
 impl AcgnaiClient {
     pub async fn new(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Self> {
         let metadata = load_or_refresh_metadata(config, llm).await?;
-        let concurrency = config
-            .audio
-            .acgnai
-            .as_ref()
-            .map(|c| c.concurrency)
-            .unwrap_or(5);
 
         Ok(Self {
             config: config.clone(),
             metadata,
-            semaphore: Semaphore::new(concurrency),
         })
     }
 
@@ -188,11 +179,6 @@ impl TtsClient for AcgnaiClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-        let _permit = self
-            .semaphore
-            .acquire()
-            .await
-            .context("Semaphore acquisition failed")?;
 
         let voice_id = if let Some(vid) = &segment.voice_id {
             vid.clone()
@@ -213,13 +199,13 @@ impl TtsClient for AcgnaiClient {
           "emotion": segment.style.clone().unwrap_or_default(),
           "fragment_interval": 0.3,
           "if_sr": false,
-          "media_type": "mp3",
+          "media_type": "wav",
           "model_name": voice_id,
           "parallel_infer": true,
           "prompt_text_lang": "中文",
           "repetition_penalty": acgnai_config.repetition_penalty,
           "sample_steps": 16,
-          "seed": -1,
+          "seed": format!("{}", rand::random::<u32>()),
           "speed_facter": acgnai_config.speed_factor,
           "split_bucket": true,
           "version": "v4",
@@ -229,6 +215,7 @@ impl TtsClient for AcgnaiClient {
           "top_p": acgnai_config.top_p,
           "temperature": acgnai_config.temperature,
           "text_split_method": "按标点符号切",
+          //"text_split_method": "凑四句一切",
         });
 
         let client = reqwest::Client::new();
@@ -236,7 +223,7 @@ impl TtsClient for AcgnaiClient {
         let mut retry = acgnai_config.retry;
         let mut download_url = String::new();
         while retry > 0 {
-            let mut req = client.post(&acgnai_config.infer_url).json(&payload);
+            let mut req = client.post(&format!("{}infer_single", acgnai_config.base_url)).json(&payload);
 
             if !acgnai_config.token.is_empty() {
                 req = req.header("Authorization", format!("Bearer {}", acgnai_config.token));
@@ -260,6 +247,11 @@ impl TtsClient for AcgnaiClient {
                         download_response.msg
                     ));
                 } else {
+                    println!(
+                        "Acgnai synthesis failed: {}, retrying...\nPayload: {:?}",
+                        payload,
+                        download_response.msg
+                    );
                     retry -= 1;
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                     continue;
@@ -268,9 +260,15 @@ impl TtsClient for AcgnaiClient {
             download_url = download_response.audio_url;
         }
 
+        println!("Downloading from URL: {}", download_url);
         // Download WAV
         let wav_resp = client.get(&download_url).send().await?;
         let wav_bytes = wav_resp.bytes().await?;
+
+        println!(
+            "Acgnai synthesis completed: {} bytes",
+            wav_bytes.len()
+        );
 
         Ok(wav_bytes.into())
     }

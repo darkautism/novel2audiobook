@@ -136,8 +136,8 @@ def strict_filter_json(input_file, output_file):
 
 if __name__ == "__main__":
     # 請確保這裡的檔名是你最新的檔案
-    input_filename = 'acgnai-voice.json' 
-    output_filename = 'acgnai-voice-elite.json'
+    input_filename = 'gsv2p.acgnai.top.json' 
+    output_filename = 'gsv2p.acgnai.top-elite.json'
     
     if os.path.exists(input_filename):
         strict_filter_json(input_filename, output_filename)

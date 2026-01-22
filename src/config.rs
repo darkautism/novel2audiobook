@@ -108,24 +108,18 @@ pub struct AcgnaiConfig {
 
     #[serde(default = "default_enable_mobs")]
     pub enable_mobs: bool,
-
-    #[serde(default = "default_acgnai_concurrency")]
-    pub concurrency: usize,
-
-    #[serde(default = "default_acgnai_model_list_url")]
-    pub model_list_url: String,
-
-    #[serde(default = "default_acgnai_infer_url")]
-    pub infer_url: String,
+    
+    #[serde(default = "default_acgnai_base_url")]
+    pub base_url: String,
 
     #[serde(default = "default_acgnai_top_k")]
     pub top_k: i32,
     #[serde(default = "default_acgnai_top_p")]
-    pub top_p: f64,
+    pub top_p: u8,
     #[serde(default = "default_acgnai_temperature")]
-    pub temperature: f64,
+    pub temperature: u8,
     #[serde(default = "default_acgnai_speed_factor")]
-    pub speed_factor: f64,
+    pub speed_factor: u8,
     #[serde(default = "default_acgnai_repetition_penalty")]
     pub repetition_penalty: f64,
 
@@ -168,26 +162,21 @@ fn default_sovits_voice_map() -> String {
     "sovits_voices.json".to_string()
 }
 
-fn default_acgnai_concurrency() -> usize {
-    5
+fn default_acgnai_base_url() -> String {
+    "https://gsv2p.acgnai.top/".to_string()
 }
-fn default_acgnai_model_list_url() -> String {
-    "https://gsv2p.acgnai.top/models/v4".to_string()
-}
-fn default_acgnai_infer_url() -> String {
-    "https://gsv2p.acgnai.top/infer_single".to_string()
-}
+
 fn default_acgnai_top_k() -> i32 {
     10
 }
-fn default_acgnai_top_p() -> f64 {
-    1.0
+fn default_acgnai_top_p() -> u8 {
+    1
 }
-fn default_acgnai_temperature() -> f64 {
-    1.0
+fn default_acgnai_temperature() -> u8 {
+    1
 }
-fn default_acgnai_speed_factor() -> f64 {
-    1.0
+fn default_acgnai_speed_factor() -> u8 {
+    1
 }
 fn default_acgnai_repetition_penalty() -> f64 {
     1.35

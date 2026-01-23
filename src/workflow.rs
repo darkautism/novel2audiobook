@@ -220,7 +220,7 @@ impl WorkflowManager {
                 && !self.config.audio.exclude_locales.contains(&v.locale)
         });
 
-        let segments: Vec<AudioSegment> = if segments_path.exists() {
+        let mut segments: Vec<AudioSegment> = if segments_path.exists() {
             println!("Loading cached segments from {:?}", segments_path);
             let content = fs::read_to_string(&segments_path)?;
             serde_json::from_str(&content)?
@@ -472,6 +472,28 @@ impl WorkflowManager {
                 }
             }
         }
+
+        // Validate and Fix Segments (Autofix) before synthesis
+        // We pass a mutable reference to segments. If it changes, we should save it.
+        let mut segments_mut = segments.clone();
+        self.tts
+            .check_and_fix_segments(
+                &mut segments_mut,
+                &working_map,
+                &excluded_voices,
+                self.llm.as_ref(),
+            )
+            .await?;
+
+        // If changed, save back to disk
+        // Note: check_and_fix_segments might populate voice_id for mobs, which is good to persist.
+        // It might also fix emotions.
+        // We do a simple check if any changed, or just overwrite.
+        // Since clone is cheap for this size, let's just overwrite if check_and_fix passes.
+        // (If it fails, it panics/errors out, so we don't save broken stuff, though typically it panics on validation failure)
+        // Wait, if check_and_fix_segments modifies segments_mut (e.g. populating voice_ids), we want to use that for synthesis.
+        segments = segments_mut;
+        fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
 
         let mut audio_files = Vec::new();
 

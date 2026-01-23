@@ -42,6 +42,16 @@ pub trait TtsClient: Send + Sync {
         Ok(Vec::new())
     }
 
+    async fn check_and_fix_segments(
+        &self,
+        _segments: &mut Vec<AudioSegment>,
+        _char_map: &CharacterMap,
+        _excluded_voices: &[String],
+        _llm: &dyn crate::llm::LlmClient,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     fn get_narrator_voice_id(&self) -> String;
     fn is_mob_enabled(&self) -> bool;
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String;

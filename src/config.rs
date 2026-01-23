@@ -106,6 +106,9 @@ pub struct GptSovitsConfig {
     pub repetition_penalty: f64,
 
     pub narrator_voice: Option<String>,
+
+    #[serde(default)]
+    pub autofix: bool,
 }
 
 fn default_input() -> String {

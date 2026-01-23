@@ -159,6 +159,162 @@ impl TtsClient for GptSovitsClient {
         }
     }
 
+    async fn check_and_fix_segments(
+        &self,
+        segments: &mut Vec<AudioSegment>,
+        char_map: &CharacterMap,
+        excluded_voices: &[String],
+        llm: &dyn LlmClient,
+    ) -> Result<()> {
+        let gpt_sovits_config = self
+            .config
+            .audio
+            .gpt_sovits
+            .as_ref()
+            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
+
+        // 1. Resolve Voice IDs & Validate
+        // Store indices of invalid segments
+        #[derive(serde::Serialize)]
+        struct InvalidSegment {
+            index: usize,
+            text: String,
+            current_style: String,
+            voice: String,
+            valid_styles: Vec<String>,
+        }
+
+        let mut invalid_emotion_segments = Vec::new();
+        let mut validation_errors = Vec::new();
+
+        // Pass 1: Resolution and Validation
+        for (i, segment) in segments.iter_mut().enumerate() {
+            // A. Resolve Voice ID if missing
+            if segment.voice_id.is_none() {
+                if let Some(speaker) = &segment.speaker {
+                    match self.resolve_voice(speaker, char_map, excluded_voices).await {
+                        Ok(vid) => segment.voice_id = Some(vid),
+                        Err(_) => {
+                            validation_errors.push(format!(
+                                "Segment {}: Unable to resolve voice for speaker '{}'",
+                                i, speaker
+                            ));
+                            continue;
+                        }
+                    }
+                } else {
+                    validation_errors.push(format!("Segment {}: Missing both voice_id and speaker", i));
+                    continue;
+                }
+            }
+
+            let voice_id = segment.voice_id.as_ref().unwrap();
+
+            // B. Validate Voice ID Existence
+            if !self.metadata.contains_key(voice_id) {
+                validation_errors.push(format!(
+                    "Segment {}: Voice ID '{}' does not exist in metadata",
+                    i, voice_id
+                ));
+                continue;
+            }
+
+            // C. Validate Emotion (Style)
+            if let Some(style) = &segment.style {
+                if !style.is_empty() {
+                    let valid_styles = &self.metadata[voice_id].emotion;
+                    if !valid_styles.contains(style) {
+                        invalid_emotion_segments.push(InvalidSegment {
+                            index: i,
+                            text: segment.text.clone(),
+                            current_style: style.clone(),
+                            voice: voice_id.clone(),
+                            valid_styles: valid_styles.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Autofix
+        if !invalid_emotion_segments.is_empty() && gpt_sovits_config.autofix {
+            println!(
+                "Found {} segments with invalid emotions. Attempting autofix via LLM...",
+                invalid_emotion_segments.len()
+            );
+
+            let prompt_payload = serde_json::to_string_pretty(&invalid_emotion_segments)?;
+            let prompt = format!(
+                "The following audio segments have invalid emotions (styles) for their assigned voices.\n\
+                 Please correct the 'style' field for each segment to one of the provided 'valid_styles'.\n\
+                 Do NOT change the text or index.\n\
+                 Select the most appropriate emotion from the valid list based on the text context and the original invalid style.\n\
+                 If no emotion fits perfectly, pick 'default' or the most neutral option available in valid_styles.\n\
+                 \n\
+                 Input Data:\n\
+                 {}\n\
+                 \n\
+                 Return a JSON list of objects with the following structure:\n\
+                 [ {{ \"index\": 0, \"style\": \"CorrectedStyle\" }}, ... ]",
+                prompt_payload
+            );
+
+            let response = llm
+                .chat("You are a helpful assistant fixing JSON data.", &prompt)
+                .await?;
+
+            let clean_json = crate::script::strip_code_blocks(&response);
+            #[derive(serde::Deserialize)]
+            struct Fix {
+                index: usize,
+                style: String,
+            }
+            let fixes: Vec<Fix> = serde_json::from_str(&clean_json)
+                .map_err(|e| anyhow!("Failed to parse autofix response: {}", e))?;
+
+            for fix in fixes {
+                if fix.index < segments.len() {
+                    segments[fix.index].style = Some(fix.style);
+                }
+            }
+
+            println!("Autofix applied. Re-validating...");
+        } else if !invalid_emotion_segments.is_empty() {
+            println!(
+                "Autofix is disabled. Found {} segments with invalid emotions.",
+                invalid_emotion_segments.len()
+            );
+        }
+
+        // 3. Final Re-validation
+        let mut final_errors = validation_errors; // Carry over structural errors
+        for (i, segment) in segments.iter().enumerate() {
+            // We only need to check emotions again, as structural stuff was checked/resolved or already in final_errors
+            if let Some(voice_id) = &segment.voice_id {
+                 if let Some(meta) = self.metadata.get(voice_id) {
+                     if let Some(style) = &segment.style {
+                         if !style.is_empty() && !meta.emotion.contains(style) {
+                             final_errors.push(format!(
+                                 "Segment {}: Invalid emotion '{}' for voice '{}'. Valid: {:?}",
+                                 i, style, voice_id, meta.emotion
+                             ));
+                         }
+                     }
+                 }
+            }
+        }
+
+        if !final_errors.is_empty() {
+            eprintln!("Manual Fix Required:");
+            for err in &final_errors {
+                eprintln!(" - {}", err);
+            }
+            anyhow::bail!("GPT-SoVITS Validation Failed: {} errors found.", final_errors.len());
+        }
+
+        Ok(())
+    }
+
     async fn synthesize(
         &self,
         segment: &AudioSegment,
@@ -258,14 +414,11 @@ impl TtsClient for GptSovitsClient {
         let burl = url::Url::parse(&base_url)?;
         durl.set_host(burl.host_str())?;
         
-        durl.set_port(burl.port());
-        println!("Downloading from URL: {}", durl.as_str());
+        let _ = durl.set_port(burl.port());
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         // Download WAV
         let wav_resp = client.get(durl.as_str()).send().await?;
         let wav_bytes = wav_resp.bytes().await?;
-
-        println!("GPT-SoVITS synthesis completed: {} bytes", wav_bytes.len());
 
         Ok(wav_bytes.into())
     }

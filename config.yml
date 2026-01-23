@@ -31,8 +31,8 @@ audio:
   gpt_sovits:
     token: YourAPIKEY
     enable_mobs: false
-    # 當第二階段文本LLM出現錯誤，是否自動再次修正
-    autofix: false
+    # 當第二階段文本LLM出現錯誤，是否自動再次修正。你可關閉此功能手動介入修正，可省下一次LLM呼叫的錢。
+    autofix: true
     retry: 5
     base_url: http://127.0.0.1:9000/
     #base_url: https://gsv2p.acgnai.top/    

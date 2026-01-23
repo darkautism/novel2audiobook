@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::llm::LlmClient;
-use crate::script::{strip_code_blocks, AudioSegment, PlainScriptGenerator, ScriptGenerator};
+use crate::script::{strip_code_blocks, AudioSegment, ScriptGenerator};
 use crate::state::{CharacterInfo, CharacterMap, WorkflowState};
 use crate::tts::{
     TtsClient, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
@@ -160,7 +160,7 @@ impl WorkflowManager {
         let mut dir = tokio_fs::read_dir(input_path).await?;
         while let Some(entry) = dir.next_entry().await? {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "txt") {
+            if path.extension().is_some_and(|ext| ext == "txt") {
                 entries.push(path);
             }
         }
@@ -214,7 +214,7 @@ impl WorkflowManager {
         let segments_path = chapter_build_dir.join("segments.json");
 
         // Prepare voices for Analysis & Script Generation
-        let mut voices = self.tts.list_voices().await.unwrap_or_default();
+        let mut voices = self.tts.list_voices().await?;
         voices.retain(|v| {
             v.locale.starts_with(&self.config.audio.language)
                 && !self.config.audio.exclude_locales.contains(&v.locale)
@@ -519,7 +519,6 @@ mod tests {
     use crate::script::JsonScriptGenerator;
     use async_trait::async_trait;
     use std::fs;
-    use std::path::Path;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -622,10 +621,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_miss_generates_segments_file() -> Result<()> {
-        let test_root = Path::new("test_output_miss");
-        if test_root.exists() {
-            fs::remove_dir_all(test_root)?;
-        }
+        let temp_dir = tempfile::tempdir()?;
+        let test_root = temp_dir.path();
 
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
@@ -685,16 +682,13 @@ mod tests {
         let content = fs::read_to_string(segments_path)?;
         assert!(content.contains("Test audio"));
 
-        let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_flattened_output_structure() -> Result<()> {
-        let test_root = Path::new("test_output_flattened");
-        if test_root.exists() {
-            fs::remove_dir_all(test_root)?;
-        }
+        let temp_dir = tempfile::tempdir()?;
+        let test_root = temp_dir.path();
 
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
@@ -759,16 +753,13 @@ mod tests {
             "Subdirectory should NOT exist in output folder"
         );
 
-        let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_cache_hit_skips_llm() -> Result<()> {
-        let test_root = Path::new("test_output_hit");
-        if test_root.exists() {
-            fs::remove_dir_all(test_root)?;
-        }
+        let temp_dir = tempfile::tempdir()?;
+        let test_root = temp_dir.path();
 
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
@@ -834,16 +825,13 @@ mod tests {
             "Should use cache and NOT call LLM"
         );
 
-        let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_voice_filtering_in_analysis_prompt() -> Result<()> {
-        let test_root = Path::new("test_output_filter");
-        if test_root.exists() {
-            fs::remove_dir_all(test_root)?;
-        }
+        let temp_dir = tempfile::tempdir()?;
+        let test_root = temp_dir.path();
 
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
@@ -934,7 +922,7 @@ mod tests {
                     .join(" ")
             }
             fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-                Box::new(PlainScriptGenerator::new())
+                Box::new(JsonScriptGenerator::new(&dummy_config()))
             }
         }
 
@@ -977,16 +965,13 @@ mod tests {
             "Excluded locale voice should not be in prompt"
         );
 
-        let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_protagonist_exclusion_and_chapter_mob() -> Result<()> {
-        let test_root = Path::new("test_output_protag");
-        if test_root.exists() {
-            fs::remove_dir_all(test_root)?;
-        }
+        let temp_dir = tempfile::tempdir()?;
+        let test_root = temp_dir.path();
 
         let build_dir = test_root.join("build");
         let input_dir = test_root.join("input");
@@ -1115,7 +1100,6 @@ mod tests {
         assert!(ex.contains(&"Voice_Narrator".to_string()));
         assert!(ex.contains(&"Voice_Hero".to_string()));
 
-        let _ = fs::remove_dir_all(test_root);
         Ok(())
     }
 }

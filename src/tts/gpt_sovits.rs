@@ -18,7 +18,7 @@ struct GptSovitsDownloadResponse {
     audio_url: String,
 }
 
-pub async fn list_voices(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Vec<Voice>> {
+pub async fn list_voices(config: &Config, llm: Option<&dyn LlmClient>) -> Result<Vec<Voice>> {
     let metadata = load_or_refresh_metadata(config, llm).await?;
     Ok(metadata_to_voices(&metadata))
 }
@@ -42,7 +42,7 @@ pub struct GptSovitsClient {
 }
 
 impl GptSovitsClient {
-    pub async fn new(config: &Config, llm: Option<&Box<dyn LlmClient>>) -> Result<Self> {
+    pub async fn new(config: &Config, llm: Option<&dyn LlmClient>) -> Result<Self> {
         let metadata = load_or_refresh_metadata(config, llm).await?;
 
         Ok(Self {
@@ -186,7 +186,7 @@ impl TtsClient for GptSovitsClient {
           "emotion": segment.style.clone().unwrap_or_default(),
           "fragment_interval": 0.3,
           "if_sr": false,
-          "media_type": "wav",
+          "media_type": "mp3",
           "model_name": voice_id,
           "parallel_infer": true,
           "prompt_text_lang": "中文",
@@ -211,7 +211,7 @@ impl TtsClient for GptSovitsClient {
         let mut download_url = String::new();
         while retry > 0 {
             let mut req = client
-                .post(&format!("{}infer_single", gpt_sovits_config.base_url))
+                .post(format!("{}infer_single", gpt_sovits_config.base_url))
                 .json(&payload);
 
             if !gpt_sovits_config.token.is_empty() {
@@ -247,13 +247,22 @@ impl TtsClient for GptSovitsClient {
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                     continue;
                 }
+            } else {
+                retry = -1;
+                download_url = download_response.audio_url;
             }
-            download_url = download_response.audio_url;
         }
 
-        println!("Downloading from URL: {}", download_url);
+        let base_url = self.config.audio.gpt_sovits.as_ref().unwrap().base_url.clone();
+        let mut durl = url::Url::parse(&download_url)?;
+        let burl = url::Url::parse(&base_url)?;
+        durl.set_host(burl.host_str())?;
+        
+        durl.set_port(burl.port());
+        println!("Downloading from URL: {}", durl.as_str());
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         // Download WAV
-        let wav_resp = client.get(&download_url).send().await?;
+        let wav_resp = client.get(durl.as_str()).send().await?;
         let wav_bytes = wav_resp.bytes().await?;
 
         println!("GPT-SoVITS synthesis completed: {} bytes", wav_bytes.len());

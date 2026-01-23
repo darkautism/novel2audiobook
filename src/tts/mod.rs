@@ -50,7 +50,7 @@ pub trait TtsClient: Send + Sync {
 
 pub async fn fetch_voice_list(
     config: &Config,
-    llm: Option<&Box<dyn crate::llm::LlmClient>>,
+    llm: Option<&dyn crate::llm::LlmClient>,
 ) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
@@ -64,7 +64,7 @@ pub async fn fetch_voice_list(
 
 pub async fn create_tts_client(
     config: &Config,
-    llm: Option<&Box<dyn crate::llm::LlmClient>>,
+    llm: Option<&dyn crate::llm::LlmClient>,
 ) -> Result<Box<dyn TtsClient>> {
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),

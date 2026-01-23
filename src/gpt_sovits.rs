@@ -32,7 +32,7 @@ struct LlmVoiceInfo {
 
 pub async fn load_or_refresh_metadata(
     config: &Config,
-    llm: Option<&Box<dyn LlmClient>>,
+    llm: Option<&dyn LlmClient>,
 ) -> Result<GptSovitsVoiceMap> {
     let url = url::Url::parse(&config.audio.gpt_sovits.as_ref().unwrap().base_url.clone()).unwrap();
     let filename = url.host_str().unwrap_or("").to_string() + ".json";
@@ -73,12 +73,7 @@ pub async fn load_or_refresh_metadata(
             .await
             .context("Failed to parse GPT-SoVITS models JSON")?;
 
-        let new_models = api_data
-            .models
-            .keys()
-            .into_iter()
-            .cloned()
-            .collect::<Vec<String>>();
+        let new_models = api_data.models.keys().cloned().collect::<Vec<String>>();
         if let Some(llm_client) = llm {
             println!("Classifying GPT-SoVITS voices via LLM...");
             // Process in chunks
@@ -114,8 +109,8 @@ pub async fn load_or_refresh_metadata(
                                                 tags: info.tags,
                                                 emotion: langs
                                                     .values()
-                                                    .cloned()
                                                     .flatten()
+                                                    .cloned()
                                                     .collect(),
                                             },
                                         );
@@ -139,7 +134,7 @@ pub async fn load_or_refresh_metadata(
                         GptSovitsVoiceMetadata {
                             gender: "Female".to_string(),
                             tags: vec![],
-                            emotion: langs.values().cloned().flatten().collect(),
+                            emotion: langs.values().flatten().cloned().collect(),
                         },
                     );
                 }

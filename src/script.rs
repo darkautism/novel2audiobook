@@ -3,7 +3,6 @@ use crate::state::CharacterMap;
 use crate::tts::Voice;
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,9 +58,9 @@ impl ScriptGenerator for JsonScriptGenerator {
                 if let Some(styles) = voice_styles.get(vid) {
                     if !styles.is_empty() {
                         use std::fmt::Write;
-                        let _ = write!(
+                        let _ = writeln!(
                             specific_styles_str,
-                            "- {} ({}): [{}]\n",
+                            "- {} ({}): [{}]",
                             name,
                             vid,
                             styles.join(", ")
@@ -167,9 +166,9 @@ impl ScriptGenerator for GptSovitsScriptGenerator {
                 .unwrap_or_default();
             let tags = voice.friendly_name.as_deref().unwrap_or("");
             use std::fmt::Write;
-            let _ = write!(
+            let _ = writeln!(
                 voices_str,
-                "- ID: {}, Name: {}, Gender: {}, Styles: [{}], Info: {}\n",
+                "- ID: {}, Name: {}, Gender: {}, Styles: [{}], Info: {}",
                 voice.short_name, voice.name, voice.gender, styles, tags
             );
         }
@@ -216,38 +215,6 @@ impl ScriptGenerator for GptSovitsScriptGenerator {
 
     fn support_style(&self) -> Vec<String> {
         vec![]
-    }
-}
-
-pub struct PlainScriptGenerator;
-
-impl PlainScriptGenerator {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl ScriptGenerator for PlainScriptGenerator {
-    fn get_system_prompt(&self) -> String {
-        "You are a story narrator.".to_string()
-    }
-
-    fn generate_prompt(
-        &self,
-        _text: &str,
-        _char_map: &CharacterMap,
-        _styles: &HashMap<String, Vec<String>>,
-        _available_voices: &[Voice],
-    ) -> Result<String> {
-        Ok("TODO: Implement prompt".to_string())
-    }
-
-    fn parse_response(&self, _response: &str) -> Result<Vec<AudioSegment>> {
-        Ok(vec![])
-    }
-
-    fn support_style(&self) -> Vec<String> {
-        todo!()
     }
 }
 

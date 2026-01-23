@@ -34,10 +34,10 @@ async fn main() -> Result<()> {
     let llm = llm::create_llm(&config)?;
 
     // 3. Interactive Setup (Voice Selection)
-    setup::run_setup(&mut config, Some(&llm)).await?;
+    setup::run_setup(&mut config, Some(llm.as_ref())).await?;
 
     // 4. Initialize TTS
-    let tts = tts::create_tts_client(&config, Some(&llm)).await?;
+    let tts = tts::create_tts_client(&config, Some(llm.as_ref())).await?;
 
     // 5. Initialize and Run Workflow
     let mut manager = WorkflowManager::new(config.clone(), llm, tts)?;

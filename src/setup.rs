@@ -4,7 +4,7 @@ use crate::tts::{fetch_voice_list, Voice};
 use anyhow::{anyhow, Result};
 use inquire::Select;
 
-pub async fn run_setup(config: &mut Config, llm: Option<&Box<dyn LlmClient>>) -> Result<()> {
+pub async fn run_setup(config: &mut Config, llm: Option<&dyn LlmClient>) -> Result<()> {
     let mut needs_save = false;
     let provider = config.audio.provider.clone();
 

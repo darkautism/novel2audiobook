@@ -1,14 +1,17 @@
 # novel2audiobook
 
-`novel2audiobook` is a powerful CLI tool written in Rust that converts text novels into high-quality audiobooks. It leverages Large Language Models (LLMs) to analyze characters and generate expressive speech synthesis markup (SSML), which is then synthesized using Microsoft Edge TTS.
+`novel2audiobook` is a powerful CLI tool written in Rust that converts text novels into high-quality audiobooks. It leverages Large Language Models (LLMs) to analyze characters and generate expressive speech synthesis markup (SSML) or audio scripts, which are then synthesized using Microsoft Edge TTS or GPT-SoVITS.
 
 ## Features
 
 - **LLM-Powered Character Analysis**: Automatically identifies characters, their gender, and importance from the text using LLMs (Gemini, Ollama, or OpenAI).
 - **Context-Aware Voice Assignment**: Assigns specific voices to characters based on analysis and maintains consistency across chapters.
-- **Expressive Audio**: Generates SSML to control prosody and style, making the audiobook sound more natural.
-- **Edge TTS Integration**: Uses high-quality, free-to-use voices from Microsoft Edge TTS.
-- **Smart Caching**: Caches analysis results and SSML to avoid redundant LLM calls and speed up reprocessing.
+- **Multiple TTS Providers**:
+  - **Edge TTS**: Uses high-quality, free-to-use voices from Microsoft Edge TTS with SSML support.
+  - **GPT-SoVITS**: Supports custom voice models via GPT-SoVITS API for even more realistic and emotional speech.
+- **Unattended Mode**: Option to run the entire conversion process without user intervention between chapters.
+- **Robust Error Handling**: Configurable retry mechanisms for LLM API calls to handle transient failures gracefully.
+- **Smart Caching**: Caches analysis results and SSML/scripts to avoid redundant LLM calls and speed up reprocessing.
 - **Resume Capability**: Skips already synthesized audio chunks if the process is interrupted.
 - **Multi-Provider Support**: Supports Google Gemini, Ollama (local), and OpenAI.
 
@@ -16,6 +19,7 @@
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable version)
 - An API key for your chosen LLM provider (Gemini, OpenAI) or a local Ollama instance.
+- (Optional) A running GPT-SoVITS API server if you plan to use that provider.
 
 ## Installation
 
@@ -41,14 +45,19 @@ input_folder: ./input_chapters
 output_folder: ./output_audio
 build_folder: ./build
 
+# Run without asking for confirmation between chapters
+unattended: false 
+
 # LLM Configuration
 llm:
   # Choose your provider: gemini, ollama, or openai
   provider: gemini 
+  retry_count: 3
+  retry_delay_seconds: 10
   
   gemini:
     api_key: "YOUR_GEMINI_API_KEY"
-    model: "gemini-1.5-flash" # or other available models
+    model: "gemini-3-flash-preview"
     
   ollama:
     base_url: "http://localhost:11434"
@@ -59,14 +68,38 @@ llm:
     model: "gpt-4o"
     base_url: "https://api.openai.com/v1" # Optional
 
-# Audio Configuration (Edge TTS)
+# Audio Configuration
 audio:
+  # Choose provider: edge-tts or gpt_sovits
   provider: edge-tts
   language: zh # Filter voices by language (e.g., zh, en, ja)
-  # These can be left blank initially to trigger the interactive setup
-  narrator_voice: zh-TW-HsiaoChenNeural
-  default_male_voice: zh-TW-YunJheNeural
-  default_female_voice: zh-TW-HsiaoYuNeural
+  
+  # Exclude specific locales (e.g. HK voices for Chinese often sound different)
+  exclude_locales:
+    - zh-HK
+
+  # --- Edge TTS Settings ---
+  edge-tts:
+    narrator_voice: zh-CN-XiaoxiaoNeural
+    default_male_voice: zh-TW-YunJheNeural
+    default_female_voice: zh-TW-HsiaoYuNeural
+    style: false # Enable to use SSML styles (may be restricted in free version)
+
+  # --- GPT-SoVITS Settings ---
+  gpt_sovits:
+    token: "YOUR_API_TOKEN" # If authentication is required
+    base_url: "http://127.0.0.1:9000/" # Your GPT-SoVITS API endpoint
+    enable_mobs: false # Use random voices for mobs?
+    autofix: true # Automatically retry with LLM on syntax errors
+    retry: 5
+    narrator_voice: "星穹铁道-中文-丹恒" # Exact name of the voice model
+    
+    # Inference parameters
+    top_k: 10
+    top_p: 1
+    temperature: 1
+    speed_factor: 1
+    repetition_penalty: 1.35
 ```
 
 ## Usage
@@ -78,10 +111,34 @@ audio:
    ```bash
    cargo run --release
    ```
+   
+   If `unattended` is `false` (default), the tool will pause after each chapter is completed and ask if you want to proceed to the next one.
 
-3. **First Run Setup**: If your `config.yml` lacks voice selections, the tool will prompt you to select a narrator, a default male voice, and a default female voice from the available Edge TTS voices.
+3. **First Run Setup**: If your `config.yml` lacks voice selections, the tool will prompt you to select a narrator, a default male voice, and a default female voice.
 
 4. **Output**: The generated audiobooks will be saved in the `output_audio` directory, organized by chapter.
+
+## Utility Tools
+
+### gpt_sovits-remove-unneed.py
+
+A Python script is included to help clean up GPT-SoVITS voice model JSON files. This is useful if you have a large model file with many low-quality or unwanted voices.
+
+**Features:**
+- Filters out voices with too few emotion samples.
+- Removes generic or unwanted characters based on name/tag blocklists (e.g., "Villager", "Soldier", "Unknown").
+- Merges tags for duplicate entries.
+
+**Usage:**
+1. Edit the script to point to your input JSON file:
+   ```python
+   input_filename = 'your_voice_list.json'
+   output_filename = 'cleaned_voice_list.json'
+   ```
+2. Run the script:
+   ```bash
+   python gpt_sovits-remove-unneed.py
+   ```
 
 ## Directory Structure
 

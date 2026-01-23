@@ -1,6 +1,7 @@
 input_folder: ./input_chapters
 output_folder: ./output_audio
 build_folder: ./build
+# 無人職守功能，開啟後不會提問下個章節要不要翻譯，直接進行下一章節的處理
 unattended: false
 llm:
   provider: gemini

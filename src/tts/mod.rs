@@ -3,6 +3,7 @@ use crate::script::{AudioSegment, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use log::info;
 use serde::Deserialize;
 
 // --- Constants ---
@@ -65,6 +66,10 @@ pub async fn fetch_voice_list(
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
         "gpt_sovits" => gpt_sovits::list_voices(config, llm).await,
+        "qwen3_tts" => {
+            let client = qwen3_tts::Qwen3TtsClient::new(config).await?;
+            client.list_voices().await
+        }
         _ => Err(anyhow::anyhow!(
             "Unknown TTS provider: {}",
             config.audio.provider
@@ -76,17 +81,20 @@ pub async fn create_tts_client(
     config: &Config,
     llm: Option<&dyn crate::llm::LlmClient>,
 ) -> Result<Box<dyn TtsClient>> {
+    info!("GG");
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
         "gpt_sovits" => Ok(Box::new(
             gpt_sovits::GptSovitsClient::new(config, llm).await?,
         )),
+        "qwen3_tts" => Ok(Box::new(qwen3_tts::Qwen3TtsClient::new(config).await?)),
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
 
 pub mod edge;
 pub mod gpt_sovits;
+pub mod qwen3_tts;
 
 #[cfg(test)]
 mod tests {

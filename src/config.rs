@@ -67,6 +67,16 @@ pub struct AudioConfig {
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
     pub gpt_sovits: Option<GptSovitsConfig>,
+    pub qwen3_tts: Option<Qwen3TtsConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct Qwen3TtsConfig {
+    #[serde(default)]
+    pub self_host: bool,
+    #[serde(default = "default_qwen3_base_url")]
+    pub base_url: String,
+    pub narrator_voice: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -157,6 +167,10 @@ fn default_gpt_sovits_speed_factor() -> u8 {
 }
 fn default_gpt_sovits_repetition_penalty() -> f64 {
     1.35
+}
+
+fn default_qwen3_base_url() -> String {
+    "http://127.0.0.1:8000".to_string()
 }
 
 impl Config {

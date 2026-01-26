@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use reqwest::{multipart, Client};
 use serde_json::{json, Value};
-use std::error::Error;
+use anyhow::{Result, Context, anyhow};
 use log::debug;
 
 /// Qwen3 TTS 推論函式
@@ -15,15 +15,16 @@ pub async fn qwen3_tts_infer(
     voice_file_path: &str,
     text: &str,
     language: &str,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>> {
     let client = Client::new();
 
     // --- 第一步：上傳檔案 ---
     debug!("正在讀取並上傳檔案: {}", voice_file_path);
-    let file_content = tokio::fs::read(voice_file_path).await?;
+    let file_content = tokio::fs::read(voice_file_path).await.context("Failed to read voice file")?;
     let part = multipart::Part::bytes(file_content)
         .file_name("model.pt")
-        .mime_str("application/octet-stream")?;
+        .mime_str("application/octet-stream")
+        .context("Invalid mime type")?;
 
     let form = multipart::Form::new().part("files", part);
 
@@ -31,11 +32,13 @@ pub async fn qwen3_tts_infer(
         .post(format!("{}/gradio_api/upload", base_url))
         .multipart(form)
         .send()
-        .await?
+        .await
+        .context("Failed to send upload request")?
         .json::<Vec<String>>()
-        .await?;
+        .await
+        .context("Failed to parse upload response")?;
 
-    let uploaded_server_path = upload_resp.get(0).ok_or("Upload failed: empty response")?;
+    let uploaded_server_path = upload_resp.get(0).ok_or(anyhow!("Upload failed: empty response"))?;
     debug!("檔案已上傳至伺服器: {}", uploaded_server_path);
 
     // --- 第二步：提交生成任務 ---
@@ -56,24 +59,27 @@ pub async fn qwen3_tts_infer(
         .post(gen_url)
         .json(&payload)
         .send()
-        .await?
+        .await
+        .context("Failed to send gen request")?
         .json::<Value>()
-        .await?;
+        .await
+        .context("Failed to parse gen response")?;
 
-    let event_id = gen_resp["event_id"].as_str().ok_or("No event_id found")?;
+    let event_id = gen_resp["event_id"].as_str().ok_or(anyhow!("No event_id found"))?;
     debug!("任務 ID: {}", event_id);
 
     // --- 第三步：監聽 SSE Stream 直到完成 ---
     let mut stream = client
         .get(format!("{}/gradio_api/call/load_prompt_and_gen/{}", base_url, event_id))
         .send()
-        .await?
+        .await
+        .context("Failed to connect to event stream")?
         .bytes_stream();
 
     let mut download_path = String::new();
 
     while let Some(item) = stream.next().await {
-        let chunk = item?;
+        let chunk = item.context("Stream error")?;
         let chunk_text = String::from_utf8_lossy(&chunk);
 
         for line in chunk_text.lines() {
@@ -99,32 +105,14 @@ pub async fn qwen3_tts_infer(
     }
 
     if download_path.is_empty() {
-        return Err("Failed to get output file path from stream".into());
+        return Err(anyhow!("Failed to get output file path from stream"));
     }
 
     // --- 第四步：下載最終檔案內容 ---
     debug!("正在下載檔案資料...");
     let download_url = format!("{}/gradio_api/file={}", base_url, download_path);
-    let file_bytes = client.get(download_url).send().await?.bytes().await?;
+    let file_bytes = client.get(download_url).send().await.context("Failed to download result")?.bytes().await.context("Failed to get bytes")?;
 
     debug!("下載成功，大小: {} bytes", file_bytes.len());
     Ok(file_bytes.to_vec())
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // 這裡可以初始化 logger 測試，不初始化則不會有輸出
-    // env_logger::init(); 
-
-    let audio_data = qwen3_tts_infer(
-        "http://127.0.0.1:8000",
-        "E:\\project\\novel2audiobook\\qwen3_tts_voices\\zh-星穹铁道_大毫-angry.pt",
-        "你好，這是一段自動生成的語音測試。",
-        "Chinese"
-    ).await?;
-
-    // 測試：將結果存檔
-    tokio::fs::write("output.wav", &audio_data).await?;
-    
-    Ok(())
 }

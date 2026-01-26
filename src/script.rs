@@ -218,6 +218,91 @@ impl ScriptGenerator for GptSovitsScriptGenerator {
     }
 }
 
+pub struct Qwen3ScriptGenerator {
+    narrator_voice_id: String,
+}
+
+impl Qwen3ScriptGenerator {
+    pub fn new(narrator_voice_id: String) -> Self {
+        Self { narrator_voice_id }
+    }
+}
+
+impl ScriptGenerator for Qwen3ScriptGenerator {
+    fn get_system_prompt(&self) -> String {
+        "你是一個有聲書腳本生成器。請將小說文本轉換為結構化的腳本 JSON。".to_string()
+    }
+
+    fn generate_prompt(
+        &self,
+        text: &str,
+        char_map: &CharacterMap,
+        voice_styles: &HashMap<String, Vec<String>>,
+        available_voices: &[Voice],
+    ) -> Result<String> {
+        let characters_json = serde_json::to_string(&char_map.characters)?;
+
+        let mut voices_str = String::new();
+        for voice in available_voices {
+            let styles = voice_styles
+                .get(&voice.short_name)
+                .map(|v| v.join(", "))
+                .unwrap_or_default();
+            // Use friendly_name as info if available (which contains tags)
+            let info = voice.friendly_name.as_deref().unwrap_or("");
+            use std::fmt::Write;
+            let _ = writeln!(
+                voices_str,
+                "- ID: {}, Name: {}, Gender: {}, Styles: [{}], Info: {}",
+                voice.short_name, voice.name, voice.gender, styles, info
+            );
+        }
+
+        let prompt = format!(
+            "請將以下小說文本分解為對話和旁白段落。\
+            根據提供的角色映射識別說話者。\
+            \n\
+            旁白ID：{}\n\
+            角色映射：{}\n\
+            \n\
+            可用聲音列表（供未分配聲音的角色選用）：\n\
+            {}\n\
+            \n\
+            輸出格式（JSON 列表）：\n\
+            [\n\
+              {{ \"speaker\": \"角色名\", \"text\": \"文本內容\", \"style\": \"情緒(可選)\", \"voice_id\": \"聲音ID(可選)\" }},\n\
+              ...\n\
+            ]\n\
+            \n\
+            規則：\n\
+            1. 每個段落都必須是一個對象。\n\
+            2. Speaker 和 voice_id 擇一填寫，未填者填入null。\n\
+            3. 旁白使用上方提供的voice_id，其情緒可從可用聲音列表找到，可以從文本中提取出適合的情緒避免念稿。\n\
+            4. 若角色無 voice_id（如路人），請從「可用聲音列表」中選擇合適的 voice_id 填入。\n\
+            5. 指定 style，必須是該 voice_id 支援的情緒。\n\
+            6. 重要：voice_id 和 style 的值必須嚴格對應列表中的 Key，**絕對禁止翻譯或修改**。\n\
+            7. 保持文本完整，不要遺漏。\n\
+            \n\n文本：\n{}",
+            self.narrator_voice_id,
+            characters_json,
+            voices_str,
+            text
+        );
+        Ok(prompt)
+    }
+
+    fn parse_response(&self, response: &str) -> Result<Vec<AudioSegment>> {
+        let clean_json = strip_code_blocks(response);
+        let segments: Vec<AudioSegment> = serde_json::from_str(&clean_json)
+            .context(format!("Failed to parse Script JSON: {}", clean_json))?;
+        Ok(segments)
+    }
+
+    fn support_style(&self) -> Vec<String> {
+        vec![]
+    }
+}
+
 pub fn strip_code_blocks(s: &str) -> String {
     let s = s.trim();
     if s.starts_with("```json") {

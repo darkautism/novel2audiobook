@@ -23,6 +23,7 @@ futures-util = "0.3.31"
 tar = "0.4.44"
 indicatif = "0.18.3"
 flate2 = "1.1.8"
+hf-hub = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3.24.0"

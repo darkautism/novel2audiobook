@@ -1,5 +1,6 @@
 mod config;
 mod gpt_sovits;
+mod qwen3_tts;
 mod llm;
 mod script;
 mod setup;
@@ -9,6 +10,7 @@ mod workflow;
 
 use anyhow::Result;
 use config::Config;
+use log::info;
 use workflow::WorkflowManager;
 
 #[tokio::main]

@@ -43,3 +43,7 @@ audio:
     speed_factor: 1
     repetition_penalty: 1.35
     narrator_voice: 星穹铁道-中文-丹恒
+  qwen3_tts:
+    self_host: true
+    base_url: http://localhost:8000
+    voice_files: kautism/qwen3_tts_voices

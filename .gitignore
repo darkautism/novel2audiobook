@@ -2,3 +2,5 @@
 /input_chapters
 /output_audio
 /build
+/.runtime/
+/qwen3_tts_voices

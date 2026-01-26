@@ -3,7 +3,6 @@ use crate::script::{AudioSegment, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use log::info;
 use serde::Deserialize;
 
 // --- Constants ---
@@ -81,7 +80,6 @@ pub async fn create_tts_client(
     config: &Config,
     llm: Option<&dyn crate::llm::LlmClient>,
 ) -> Result<Box<dyn TtsClient>> {
-    info!("GG");
     match config.audio.provider.as_str() {
         "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
         "gpt_sovits" => Ok(Box::new(

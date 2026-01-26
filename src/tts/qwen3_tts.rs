@@ -4,6 +4,7 @@ use crate::state::CharacterMap;
 use crate::tts::{TtsClient, Voice};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use zhconv::{zhconv, Variant};
 use hf_hub::api::tokio::Api;
 use log::{info, warn};
 use serde::Deserialize;
@@ -195,10 +196,16 @@ impl TtsClient for Qwen3TtsClient {
             _ => "Chinese", // Default
         };
 
+        let text = if infer_lang == "Chinese" {
+            &zhconv(&segment.text, Variant::ZhCN)
+        } else {
+            &segment.text
+        };
+
         qwen3_tts_infer(
             base_url,
             file_path.to_str().unwrap(),
-            &segment.text,
+            text,
             infer_lang,
         )
         .await

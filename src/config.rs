@@ -86,9 +86,6 @@ pub struct EdgeTtsConfig {
     pub default_female_voice: Option<String>,
     #[serde(default)]
     pub style: bool,
-
-    #[serde(default = "default_enable_mobs")]
-    pub enable_mobs: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -97,9 +94,6 @@ pub struct GptSovitsConfig {
 
     #[serde(default)]
     pub retry: i32,
-
-    #[serde(default = "default_enable_mobs")]
-    pub enable_mobs: bool,
 
     #[serde(default = "default_gpt_sovits_base_url")]
     pub base_url: String,
@@ -132,9 +126,6 @@ fn default_build() -> String {
 }
 fn default_language() -> String {
     "zh".to_string()
-}
-fn default_enable_mobs() -> bool {
-    true
 }
 fn default_exclude_locales() -> Vec<String> {
     vec![]

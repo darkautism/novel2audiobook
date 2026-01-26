@@ -263,12 +263,7 @@ impl TtsClient for EdgeTtsClient {
     }
 
     fn is_mob_enabled(&self) -> bool {
-        self.config
-            .audio
-            .edge_tts
-            .as_ref()
-            .map(|c| c.enable_mobs)
-            .unwrap_or(true)
+        true
     }
 
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String {

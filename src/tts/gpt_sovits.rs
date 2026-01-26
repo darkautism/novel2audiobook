@@ -441,12 +441,7 @@ impl TtsClient for GptSovitsClient {
     }
 
     fn is_mob_enabled(&self) -> bool {
-        self.config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .map(|c| c.enable_mobs)
-            .unwrap_or(true)
+        false
     }
 
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String {

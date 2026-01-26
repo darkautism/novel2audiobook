@@ -253,7 +253,7 @@ impl TtsClient for Qwen3TtsClient {
     }
 
     fn is_mob_enabled(&self) -> bool {
-        true
+        false
     }
 
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String {

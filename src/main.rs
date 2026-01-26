@@ -10,7 +10,6 @@ mod workflow;
 
 use anyhow::Result;
 use config::Config;
-use log::info;
 use workflow::WorkflowManager;
 
 #[tokio::main]

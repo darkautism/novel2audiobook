@@ -1019,7 +1019,6 @@ mod tests {
                 provider: "edge-tts".to_string(),
                 edge_tts: Some(crate::config::EdgeTtsConfig {
                     narrator_voice: Some("Voice_Narrator".to_string()),
-                    enable_mobs: true,
                     ..Default::default()
                 }),
                 ..Default::default()

@@ -1,25 +1,12 @@
-mod config;
-mod gpt_sovits;
-mod qwen3_tts;
-mod llm;
-mod script;
-mod setup;
-mod state;
-mod tts;
-mod workflow;
-
 use anyhow::Result;
-use config::Config;
-use workflow::WorkflowManager;
+use novel2audiobook::core::config::Config;
+use novel2audiobook::services::{llm, setup, tts, workflow::WorkflowManager};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
 
     // 1. Load or Create Config
-    // If load fails, we should check if it's because it doesn't exist.
-    // If it doesn't exist, we can't do much without API keys.
-    // But we can verify directories.
     let mut config = match Config::load() {
         Ok(cfg) => cfg,
         Err(e) => {

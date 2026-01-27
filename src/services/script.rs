@@ -1,5 +1,5 @@
-use crate::state::CharacterMap;
-use crate::tts::Voice;
+use crate::core::state::CharacterMap;
+use crate::services::tts::Voice;
 use anyhow::{Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

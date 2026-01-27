@@ -1,6 +1,7 @@
-use crate::config::Config;
-use crate::script::{AudioSegment, ScriptGenerator};
-use crate::state::CharacterMap;
+use crate::core::config::Config;
+use crate::services::script::{AudioSegment, ScriptGenerator};
+use crate::core::state::CharacterMap;
+use crate::services::llm::LlmClient;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::info;
@@ -48,7 +49,7 @@ pub trait TtsClient: Send + Sync {
         _segments: &mut Vec<AudioSegment>,
         _char_map: &CharacterMap,
         _excluded_voices: &[String],
-        _llm: &dyn crate::llm::LlmClient,
+        _llm: &dyn LlmClient,
     ) -> Result<()> {
         Ok(())
     }
@@ -61,7 +62,7 @@ pub trait TtsClient: Send + Sync {
 
 pub async fn fetch_voice_list(
     config: &Config,
-    llm: Option<&dyn crate::llm::LlmClient>,
+    llm: Option<&dyn LlmClient>,
 ) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
@@ -93,7 +94,7 @@ pub async fn fetch_voice_list(
 
 pub async fn create_tts_client(
     config: &Config,
-    llm: Option<&dyn crate::llm::LlmClient>,
+    llm: Option<&dyn LlmClient>,
 ) -> Result<Box<dyn TtsClient>> {
     info!("Initializing TTS Client for provider: {}", config.audio.provider);
     match config.audio.provider.as_str() {
@@ -134,11 +135,13 @@ pub async fn create_tts_client(
 pub mod edge;
 pub mod gpt_sovits;
 pub mod qwen3_tts;
+pub mod gpt_sovits_config;
+pub mod qwen3_api;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tts::edge::EdgeTtsConfig;
+    use crate::services::tts::edge::EdgeTtsConfig;
 
     #[test]
     fn test_pick_random_voice() {

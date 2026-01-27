@@ -1,12 +1,13 @@
-use crate::script::{AudioSegment, JsonScriptGenerator, ScriptGenerator};
-use crate::state::CharacterMap;
+use crate::core::state::CharacterMap;
+use crate::services::script::{AudioSegment, JsonScriptGenerator, ScriptGenerator};
+use crate::services::tts::{
+    TtsClient, Voice, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
+};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-
-use crate::tts::{TtsClient, Voice, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL};
 
 const TRUSTED_CLIENT_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const CHROMIUM_MAJOR_VERSION: &str = "143";

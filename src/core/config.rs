@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use crate::gpt_sovits::GptSovitsConfig;
-use crate::llm::LlmConfig;
-use crate::tts::edge::EdgeTtsConfig;
-use crate::tts::qwen3_tts::Qwen3TtsConfig;
+use crate::services::llm::LlmConfig;
+use crate::services::tts::edge::EdgeTtsConfig;
+use crate::services::tts::gpt_sovits_config::GptSovitsConfig;
+use crate::services::tts::qwen3_tts::Qwen3TtsConfig;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -72,12 +72,12 @@ impl Config {
 
         let content = fs::read_to_string(path).context("Failed to read config.yml")?;
         let config: Config =
-            serde_norway::from_str(&content).context("Failed to parse config.yml")?;
+            serde_yml::from_str(&content).context("Failed to parse config.yml")?;
         Ok(config)
     }
 
     pub fn save(&self) -> Result<()> {
-        let content = serde_norway::to_string(self)?;
+        let content = serde_yml::to_string(self)?;
         fs::write("config.yml", content).context("Failed to write config.yml")?;
         Ok(())
     }

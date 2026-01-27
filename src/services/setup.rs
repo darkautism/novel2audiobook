@@ -1,6 +1,6 @@
-use crate::config::Config;
-use crate::llm::LlmClient;
-use crate::tts::{fetch_voice_list, Voice};
+use crate::core::config::Config;
+use crate::services::llm::LlmClient;
+use crate::services::tts::{fetch_voice_list, Voice};
 use anyhow::{anyhow, Result};
 use inquire::Select;
 
@@ -65,7 +65,7 @@ pub async fn run_setup(config: &mut Config, llm: Option<&dyn LlmClient>) -> Resu
         }
         "gpt_sovits" => {
             if config.audio.gpt_sovits.is_none() {
-                config.audio.gpt_sovits = Some(crate::gpt_sovits::GptSovitsConfig {
+                config.audio.gpt_sovits = Some(crate::services::tts::gpt_sovits_config::GptSovitsConfig {
                     token: "".to_string(),
                     base_url: "https://gsv2p.acgnai.top/".to_string(),
                     top_k: 10,

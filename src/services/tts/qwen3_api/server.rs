@@ -19,6 +19,12 @@ pub struct Qwen3Server {
     child: Arc<RwLock<Option<Child>>>,
 }
 
+impl Default for Qwen3Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Qwen3Server {
     pub fn new() -> Self {
         Self {

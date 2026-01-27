@@ -1,17 +1,19 @@
-use crate::config::Config;
-use crate::llm::LlmClient;
-use crate::script::{strip_code_blocks, AudioSegment, ScriptGenerator};
-use crate::state::{CharacterInfo, CharacterMap, WorkflowState};
-use crate::tts::{
+use crate::core::config::Config;
+use crate::core::state::{CharacterInfo, CharacterMap, WorkflowState};
+use crate::services::llm::LlmClient;
+use crate::services::script::{strip_code_blocks, AudioSegment, ScriptGenerator};
+use crate::services::tts::{
     TtsClient, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
     VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs as tokio_fs;
 
 pub struct WorkflowManager {
@@ -495,23 +497,38 @@ impl WorkflowManager {
         segments = segments_mut;
         fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
 
-        let mut audio_files = Vec::new();
+        let pb = ProgressBar::new(segments.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")?
+            .progress_chars("#>-"));
 
-        for (i, segment) in segments.iter().enumerate() {
-            let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
-            if chunk_path.exists() {
-                audio_files.push(chunk_path);
-                continue;
-            }
+        let tts = &self.tts;
+        let working_map_ref = &working_map;
+        let excluded_voices_ref = &excluded_voices;
 
-            println!("Synthesizing chunk {}/{}", i + 1, segments.len());
+        let results: Vec<Result<(usize, PathBuf)>> = futures_util::stream::iter(segments.iter().enumerate())
+            .map(|(i, segment)| {
+                let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
+                let pb = pb.clone();
+                async move {
+                    if !chunk_path.exists() {
+                        let audio_data = tts.synthesize(segment, working_map_ref, excluded_voices_ref).await?;
+                        tokio_fs::write(&chunk_path, audio_data).await?;
+                    }
+                    pb.inc(1);
+                    Ok((i, chunk_path))
+                }
+            })
+            .buffer_unordered(5)
+            .collect()
+            .await;
 
-            let audio_data = self
-                .tts
-                .synthesize(segment, &working_map, &excluded_voices)
-                .await?;
-            fs::write(&chunk_path, audio_data)?;
-            audio_files.push(chunk_path);
+        pb.finish_with_message("Synthesis complete");
+
+        let mut audio_files = vec![PathBuf::new(); segments.len()];
+        for res in results {
+            let (i, path) = res?;
+            audio_files[i] = path;
         }
 
         // 4. Merge
@@ -538,7 +555,7 @@ impl WorkflowManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::script::JsonScriptGenerator;
+    use crate::services::script::JsonScriptGenerator;
     use async_trait::async_trait;
     use std::fs;
     use std::sync::{Arc, Mutex};
@@ -587,7 +604,7 @@ mod tests {
 
     #[async_trait]
     impl TtsClient for MockTtsClient {
-        async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+        async fn list_voices(&self) -> Result<Vec<crate::services::tts::Voice>> {
             Ok(vec![])
         }
         async fn synthesize(
@@ -615,7 +632,7 @@ mod tests {
         fn is_mob_enabled(&self) -> bool {
             true
         }
-        fn format_voice_list_for_analysis(&self, _voices: &[crate::tts::Voice]) -> String {
+        fn format_voice_list_for_analysis(&self, _voices: &[crate::services::tts::Voice]) -> String {
             "mock voice list".to_string()
         }
         fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
@@ -641,7 +658,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::llm::LlmConfig {
+            llm: crate::services::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -649,10 +666,10 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig {
+            audio: crate::core::config::AudioConfig {
                 provider: "edge-tts".to_string(),
                 edge_tts: Some(Default::default()),
-                ..crate::config::AudioConfig::default()
+                ..crate::core::config::AudioConfig::default()
             },
         };
 
@@ -707,7 +724,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::llm::LlmConfig {
+            llm: crate::services::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -715,10 +732,10 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig {
+            audio: crate::core::config::AudioConfig {
                 provider: "edge-tts".to_string(),
                 edge_tts: Some(Default::default()),
-                ..crate::config::AudioConfig::default()
+                ..crate::core::config::AudioConfig::default()
             },
         };
 
@@ -778,7 +795,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::llm::LlmConfig {
+            llm: crate::services::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -786,10 +803,10 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig {
+            audio: crate::core::config::AudioConfig {
                 provider: "edge-tts".to_string(),
                 edge_tts: Some(Default::default()),
-                ..crate::config::AudioConfig::default()
+                ..crate::core::config::AudioConfig::default()
             },
         };
 
@@ -850,7 +867,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::llm::LlmConfig {
+            llm: crate::services::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -858,12 +875,12 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig {
+            audio: crate::core::config::AudioConfig {
                 provider: "edge-tts".to_string(),
                 language: "zh".to_string(),
                 exclude_locales: vec!["zh-HK".to_string()],
                 edge_tts: Some(Default::default()),
-                ..crate::config::AudioConfig::default()
+                ..crate::core::config::AudioConfig::default()
             },
         };
 
@@ -891,11 +908,11 @@ mod tests {
 
         // Setup Mock TTS with voices
         struct MockTts {
-            voices: Vec<crate::tts::Voice>,
+            voices: Vec<crate::services::tts::Voice>,
         }
         #[async_trait]
         impl TtsClient for MockTts {
-            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+            async fn list_voices(&self) -> Result<Vec<crate::services::tts::Voice>> {
                 Ok(self.voices.clone())
             }
             async fn synthesize(
@@ -915,7 +932,7 @@ mod tests {
             fn is_mob_enabled(&self) -> bool {
                 true
             }
-            fn format_voice_list_for_analysis(&self, voices: &[crate::tts::Voice]) -> String {
+            fn format_voice_list_for_analysis(&self, voices: &[crate::services::tts::Voice]) -> String {
                 // Return specific format to verify test expectations if needed, or just a mock
                 // The test checks if specific voice names are in the prompt.
                 // The `format_voice_list_for_analysis` should return string containing voice names.
@@ -931,21 +948,21 @@ mod tests {
         }
 
         let voices = vec![
-            crate::tts::Voice {
+            crate::services::tts::Voice {
                 short_name: "zh-TW-A".to_string(),
                 gender: "Male".to_string(),
                 locale: "zh-TW".to_string(),
                 name: "A".to_string(),
                 friendly_name: None,
             },
-            crate::tts::Voice {
+            crate::services::tts::Voice {
                 short_name: "zh-HK-B".to_string(),
                 gender: "Female".to_string(),
                 locale: "zh-HK".to_string(),
                 name: "B".to_string(),
                 friendly_name: None,
             },
-            crate::tts::Voice {
+            crate::services::tts::Voice {
                 short_name: "zh-CN-C".to_string(),
                 gender: "Male".to_string(),
                 locale: "zh-CN".to_string(),
@@ -989,7 +1006,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::llm::LlmConfig {
+            llm: crate::services::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -997,9 +1014,9 @@ mod tests {
                 ollama: None,
                 openai: None,
             },
-            audio: crate::config::AudioConfig {
+            audio: crate::core::config::AudioConfig {
                 provider: "edge-tts".to_string(),
-                edge_tts: Some(crate::tts::edge::EdgeTtsConfig {
+                edge_tts: Some(crate::services::tts::edge::EdgeTtsConfig {
                     narrator_voice: Some("Voice_Narrator".to_string()),
                     ..Default::default()
                 }),
@@ -1039,7 +1056,7 @@ mod tests {
         }
         #[async_trait]
         impl TtsClient for VerifyingTts {
-            async fn list_voices(&self) -> Result<Vec<crate::tts::Voice>> {
+            async fn list_voices(&self) -> Result<Vec<crate::services::tts::Voice>> {
                 Ok(vec![])
             }
             async fn synthesize(
@@ -1080,7 +1097,7 @@ mod tests {
             fn is_mob_enabled(&self) -> bool {
                 true
             }
-            fn format_voice_list_for_analysis(&self, _voices: &[crate::tts::Voice]) -> String {
+            fn format_voice_list_for_analysis(&self, _voices: &[crate::services::tts::Voice]) -> String {
                 "".to_string()
             }
             fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {

@@ -1,8 +1,10 @@
-use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsConfig, GptSovitsVoiceMap};
-use crate::llm::LlmClient;
-use crate::script::{AudioSegment, GptSovitsScriptGenerator, ScriptGenerator};
-use crate::state::CharacterMap;
-use crate::tts::{
+use crate::core::state::CharacterMap;
+use crate::services::llm::LlmClient;
+use crate::services::script::{AudioSegment, GptSovitsScriptGenerator, ScriptGenerator};
+use crate::services::tts::gpt_sovits_config::{
+    load_or_refresh_metadata, GptSovitsConfig, GptSovitsVoiceMap,
+};
+use crate::services::tts::{
     TtsClient, Voice, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
     VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
 };
@@ -257,7 +259,7 @@ impl TtsClient for GptSovitsClient {
                 .chat("You are a helpful assistant fixing JSON data.", &prompt)
                 .await?;
 
-            let clean_json = crate::script::strip_code_blocks(&response);
+            let clean_json = crate::services::script::strip_code_blocks(&response);
             #[derive(serde::Deserialize)]
             struct Fix {
                 index: usize,

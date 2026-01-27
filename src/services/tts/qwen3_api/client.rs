@@ -38,7 +38,7 @@ pub async fn qwen3_tts_infer(
         .await
         .context("Failed to parse upload response")?;
 
-    let uploaded_server_path = upload_resp.get(0).ok_or(anyhow!("Upload failed: empty response"))?;
+    let uploaded_server_path = upload_resp.first().ok_or(anyhow!("Upload failed: empty response"))?;
     debug!("檔案已上傳至伺服器: {}", uploaded_server_path);
 
     // --- 第二步：提交生成任務 ---
@@ -83,14 +83,13 @@ pub async fn qwen3_tts_infer(
         let chunk_text = String::from_utf8_lossy(&chunk);
 
         for line in chunk_text.lines() {
-            if line.starts_with("data: ") {
-                let json_str = &line[6..];
+            if let Some(json_str) = line.strip_prefix("data: ") {
                 if json_str.is_empty() || json_str == "null" { continue; }
 
                 if let Ok(data) = serde_json::from_str::<Value>(json_str) {
                     // 解析 Gradio 的回傳結構
                     if let Some(output_array) = data.as_array() {
-                        if let Some(file_info) = output_array.get(0) {
+                        if let Some(file_info) = output_array.first() {
                             if let Some(final_path) = file_info["path"].as_str() {
                                 debug!("生成完成，取得路徑: {}", final_path);
                                 download_path = final_path.to_string();

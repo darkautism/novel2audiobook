@@ -1,4 +1,4 @@
-use crate::llm::LlmClient;
+use crate::services::llm::LlmClient;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -142,7 +142,7 @@ pub async fn load_or_refresh_metadata(
                     .await
                 {
                     Ok(response) => {
-                        let clean_json = crate::script::strip_code_blocks(&response);
+                        let clean_json = crate::services::script::strip_code_blocks(&response);
                         match serde_json::from_str::<HashMap<String, LlmVoiceInfo>>(&clean_json) {
                             Ok(parsed) => {
                                 for (name, info) in parsed {

@@ -1,18 +1,17 @@
-use crate::script::{AudioSegment, ScriptGenerator};
-use crate::state::CharacterMap;
-use crate::tts::{TtsClient, Voice};
+use crate::core::state::CharacterMap;
+use crate::services::script::{AudioSegment, ScriptGenerator};
+use crate::services::tts::qwen3_api::client::qwen3_tts_infer;
+use crate::services::tts::qwen3_api::server::Qwen3Server;
+use crate::services::tts::{TtsClient, Voice};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use zhconv::{zhconv, Variant};
 use hf_hub::api::tokio::Api;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
-
-use crate::qwen3_tts::client::qwen3_tts_infer;
-use crate::qwen3_tts::server::Qwen3Server;
+use zhconv::{zhconv, Variant};
 
 // --- Config ---
 
@@ -287,7 +286,7 @@ impl TtsClient for Qwen3TtsClient {
     }
 
     fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-        Box::new(crate::script::Qwen3ScriptGenerator::new(
+        Box::new(crate::services::script::Qwen3ScriptGenerator::new(
             self.get_narrator_voice_id(),
         ))
     }

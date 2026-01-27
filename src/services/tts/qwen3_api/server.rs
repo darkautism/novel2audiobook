@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use log::{info, warn};
+use log::debug;
+use log::info;
 use std::env;
 use std::fs;
 use std::io::Cursor;
@@ -96,7 +97,7 @@ impl Qwen3Server {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
-                warn!("[Qwen3-Server Error] {}", line);
+                debug!("[Qwen3-Server Error] {}", line);
             }
         });
 

@@ -12,7 +12,6 @@ use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use tokio::fs as tokio_fs;
 
@@ -541,11 +540,8 @@ impl WorkflowManager {
             .to_string();
         let final_audio_path = Path::new(&self.config.output_folder).join(output_filename);
 
-        let mut final_file = fs::File::create(&final_audio_path)?;
-        for path in audio_files {
-            let data = fs::read(path)?;
-            final_file.write_all(&data)?;
-        }
+        self.tts
+            .merge_audio_files(&audio_files, &final_audio_path)?;
 
         println!("Chapter complete: {:?}", final_audio_path);
         Ok(())

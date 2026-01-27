@@ -451,4 +451,12 @@ impl TtsClient for GptSovitsClient {
     fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
         Box::new(GptSovitsScriptGenerator::new(self.get_narrator_voice_id()))
     }
+
+    fn merge_audio_files(
+        &self,
+        inputs: &[std::path::PathBuf],
+        output: &std::path::Path,
+    ) -> Result<()> {
+        crate::utils::audio::merge_wav_files(inputs, output)
+    }
 }

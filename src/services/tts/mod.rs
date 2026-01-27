@@ -58,6 +58,14 @@ pub trait TtsClient: Send + Sync {
     fn is_mob_enabled(&self) -> bool;
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String;
     fn get_script_generator(&self) -> Box<dyn ScriptGenerator>;
+
+    fn merge_audio_files(
+        &self,
+        inputs: &[std::path::PathBuf],
+        output: &std::path::Path,
+    ) -> Result<()> {
+        crate::utils::audio::merge_binary_files(inputs, output)
+    }
 }
 
 pub async fn fetch_voice_list(

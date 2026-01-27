@@ -1,5 +1,4 @@
-use crate::config::Config;
-use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsVoiceMap};
+use crate::gpt_sovits::{load_or_refresh_metadata, GptSovitsConfig, GptSovitsVoiceMap};
 use crate::llm::LlmClient;
 use crate::script::{AudioSegment, GptSovitsScriptGenerator, ScriptGenerator};
 use crate::state::CharacterMap;
@@ -18,8 +17,12 @@ struct GptSovitsDownloadResponse {
     audio_url: String,
 }
 
-pub async fn list_voices(config: &Config, llm: Option<&dyn LlmClient>) -> Result<Vec<Voice>> {
-    let metadata = load_or_refresh_metadata(config, llm).await?;
+pub async fn list_voices(
+    config: &GptSovitsConfig,
+    language: &str,
+    llm: Option<&dyn LlmClient>,
+) -> Result<Vec<Voice>> {
+    let metadata = load_or_refresh_metadata(config, language, llm).await?;
     Ok(metadata_to_voices(&metadata))
 }
 
@@ -37,18 +40,19 @@ fn metadata_to_voices(metadata: &GptSovitsVoiceMap) -> Vec<Voice> {
 }
 
 pub struct GptSovitsClient {
-    config: Config,
+    config: GptSovitsConfig,
     metadata: GptSovitsVoiceMap,
 }
 
 impl GptSovitsClient {
-    pub async fn new(config: &Config, llm: Option<&dyn LlmClient>) -> Result<Self> {
-        let metadata = load_or_refresh_metadata(config, llm).await?;
+    pub async fn new(
+        config: GptSovitsConfig,
+        language: &str,
+        llm: Option<&dyn LlmClient>,
+    ) -> Result<Self> {
+        let metadata = load_or_refresh_metadata(&config, language, llm).await?;
 
-        Ok(Self {
-            config: config.clone(),
-            metadata,
-        })
+        Ok(Self { config, metadata })
     }
 
     fn pick_random_voice(
@@ -101,12 +105,7 @@ impl GptSovitsClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> Result<String> {
-        let gpt_sovits_config = self
-            .config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
+        let gpt_sovits_config = &self.config;
 
         // 1. Narrator
         if speaker == "旁白" || speaker.eq_ignore_ascii_case("Narrator") {
@@ -166,12 +165,7 @@ impl TtsClient for GptSovitsClient {
         excluded_voices: &[String],
         llm: &dyn LlmClient,
     ) -> Result<()> {
-        let gpt_sovits_config = self
-            .config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
+        let gpt_sovits_config = &self.config;
 
         // 1. Resolve Voice IDs & Validate
         // Store indices of invalid segments
@@ -329,12 +323,7 @@ impl TtsClient for GptSovitsClient {
         } else {
             panic!("No speaker or voice_id specified for segment");
         };
-        let gpt_sovits_config = self
-            .config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .ok_or_else(|| anyhow!("GPT-SoVITS config missing"))?;
+        let gpt_sovits_config = &self.config;
 
         let payload = json!({
           "batch_size": 10,
@@ -409,7 +398,7 @@ impl TtsClient for GptSovitsClient {
             }
         }
 
-        let base_url = self.config.audio.gpt_sovits.as_ref().unwrap().base_url.clone();
+        let base_url = gpt_sovits_config.base_url.clone();
         let mut durl = url::Url::parse(&download_url)?;
         let burl = url::Url::parse(&base_url)?;
         durl.set_host(burl.host_str())?;
@@ -433,10 +422,8 @@ impl TtsClient for GptSovitsClient {
 
     fn get_narrator_voice_id(&self) -> String {
         self.config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .and_then(|c| c.narrator_voice.clone())
+            .narrator_voice
+            .clone()
             .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
     }
 

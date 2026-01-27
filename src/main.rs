@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     config.ensure_directories()?;
 
     // 2. Initialize LLM
-    let llm = llm::create_llm(&config)?;
+    let llm = llm::create_llm(&config.llm)?;
 
     // 3. Interactive Setup (Voice Selection)
     setup::run_setup(&mut config, Some(llm.as_ref())).await?;

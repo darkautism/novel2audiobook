@@ -3,6 +3,7 @@ use crate::script::{AudioSegment, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use log::info;
 use serde::Deserialize;
 
 // --- Constants ---
@@ -64,9 +65,23 @@ pub async fn fetch_voice_list(
 ) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
         "edge-tts" => edge::list_voices().await,
-        "gpt_sovits" => gpt_sovits::list_voices(config, llm).await,
+        "gpt_sovits" => {
+            let gpt_config = config
+                .audio
+                .gpt_sovits
+                .as_ref()
+                .ok_or_else(|| anyhow!("GPT-Sovits config missing"))?;
+            let language = &config.audio.language;
+            gpt_sovits::list_voices(gpt_config, language, llm).await
+        }
         "qwen3_tts" => {
-            let client = qwen3_tts::Qwen3TtsClient::new(config).await?;
+            let qwen_config = config
+                .audio
+                .qwen3_tts
+                .clone()
+                .ok_or_else(|| anyhow!("Qwen3 TTS config missing"))?;
+            let language = config.audio.language.clone();
+            let client = qwen3_tts::Qwen3TtsClient::new(qwen_config, language).await?;
             client.list_voices().await
         }
         _ => Err(anyhow::anyhow!(
@@ -80,12 +95,38 @@ pub async fn create_tts_client(
     config: &Config,
     llm: Option<&dyn crate::llm::LlmClient>,
 ) -> Result<Box<dyn TtsClient>> {
+    info!("Initializing TTS Client for provider: {}", config.audio.provider);
     match config.audio.provider.as_str() {
-        "edge-tts" => Ok(Box::new(edge::EdgeTtsClient::new(config).await?)),
-        "gpt_sovits" => Ok(Box::new(
-            gpt_sovits::GptSovitsClient::new(config, llm).await?,
-        )),
-        "qwen3_tts" => Ok(Box::new(qwen3_tts::Qwen3TtsClient::new(config).await?)),
+        "edge-tts" => {
+            let edge_config = config.audio.edge_tts.clone().unwrap_or_default();
+            let exclude_locales = config.audio.exclude_locales.clone();
+            let language = config.audio.language.clone();
+            Ok(Box::new(
+                edge::EdgeTtsClient::new(edge_config, exclude_locales, language).await?,
+            ))
+        }
+        "gpt_sovits" => {
+            let gpt_config = config
+                .audio
+                .gpt_sovits
+                .clone()
+                .ok_or_else(|| anyhow!("GPT-Sovits config missing"))?;
+            let language = config.audio.language.clone();
+            Ok(Box::new(
+                gpt_sovits::GptSovitsClient::new(gpt_config, &language, llm).await?,
+            ))
+        }
+        "qwen3_tts" => {
+            let qwen_config = config
+                .audio
+                .qwen3_tts
+                .clone()
+                .ok_or_else(|| anyhow!("Qwen3 TTS config missing"))?;
+            let language = config.audio.language.clone();
+            Ok(Box::new(
+                qwen3_tts::Qwen3TtsClient::new(qwen_config, language).await?,
+            ))
+        }
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
@@ -97,35 +138,16 @@ pub mod qwen3_tts;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AudioConfig;
+    use crate::tts::edge::EdgeTtsConfig;
 
     #[test]
     fn test_pick_random_voice() {
-        // This test logic is now also covered in edge::tests, but we can keep a high level check here if needed.
-        // However, we cannot access EdgeTtsClient::new_with_voices because EdgeTtsClient is now in edge module and new_with_voices might need to be pub.
-        // It is `pub fn new_with_voices` in `src/tts/edge.rs`.
-        // So we can access it via `edge::EdgeTtsClient`.
-
-        let config = Config {
-            input_folder: "".to_string(),
-            output_folder: "".to_string(),
-            build_folder: "".to_string(),
-            unattended: false,
-            llm: crate::config::LlmConfig {
-                provider: "mock".to_string(),
-                retry_count: 0,
-                retry_delay_seconds: 0,
-                gemini: None,
-                ollama: None,
-                openai: None,
-            },
-            audio: AudioConfig {
-                provider: "edge-tts".to_string(),
-                language: "zh".to_string(),
-                exclude_locales: vec!["zh-HK".to_string()],
-                ..Default::default()
-            },
+        let edge_config = EdgeTtsConfig {
+            narrator_voice: Some("Narrator".to_string()),
+            ..Default::default()
         };
+        let exclude_locales = vec!["zh-HK".to_string()];
+        let language = "zh".to_string();
 
         let voices = vec![
             Voice {
@@ -151,7 +173,12 @@ mod tests {
             },
         ];
 
-        let client = edge::EdgeTtsClient::new_with_voices(&config, voices);
+        let client = edge::EdgeTtsClient::new_with_voices(
+            edge_config,
+            exclude_locales,
+            language,
+            voices,
+        );
 
         // Test filtering
         let v = client.pick_random_voice(Some("Male"), &[]);

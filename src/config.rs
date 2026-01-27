@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+use crate::gpt_sovits::GptSovitsConfig;
+use crate::llm::LlmConfig;
+use crate::tts::edge::EdgeTtsConfig;
+use crate::tts::qwen3_tts::Qwen3TtsConfig;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_input")]
@@ -23,37 +28,6 @@ pub struct Config {
     pub audio: AudioConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LlmConfig {
-    pub provider: String, // "gemini", "ollama" or "openai"
-    #[serde(default = "default_retry_count")]
-    pub retry_count: usize,
-    #[serde(default = "default_retry_delay")]
-    pub retry_delay_seconds: u64,
-    pub gemini: Option<GeminiConfig>,
-    pub ollama: Option<OllamaConfig>,
-    pub openai: Option<OpenAIConfig>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OpenAIConfig {
-    pub api_key: String,
-    pub model: String,
-    pub base_url: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GeminiConfig {
-    pub api_key: String,
-    pub model: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OllamaConfig {
-    pub base_url: String,
-    pub model: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AudioConfig {
     #[serde(default = "default_tts_provider")]
@@ -68,51 +42,6 @@ pub struct AudioConfig {
     pub edge_tts: Option<EdgeTtsConfig>,
     pub gpt_sovits: Option<GptSovitsConfig>,
     pub qwen3_tts: Option<Qwen3TtsConfig>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct Qwen3TtsConfig {
-    #[serde(default)]
-    pub self_host: bool,
-    #[serde(default = "default_qwen3_base_url")]
-    pub base_url: String,
-    pub narrator_voice: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct EdgeTtsConfig {
-    pub narrator_voice: Option<String>,
-    pub default_male_voice: Option<String>,
-    pub default_female_voice: Option<String>,
-    #[serde(default)]
-    pub style: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct GptSovitsConfig {
-    pub token: String,
-
-    #[serde(default)]
-    pub retry: i32,
-
-    #[serde(default = "default_gpt_sovits_base_url")]
-    pub base_url: String,
-
-    #[serde(default = "default_gpt_sovits_top_k")]
-    pub top_k: i32,
-    #[serde(default = "default_gpt_sovits_top_p")]
-    pub top_p: u8,
-    #[serde(default = "default_gpt_sovits_temperature")]
-    pub temperature: u8,
-    #[serde(default = "default_gpt_sovits_speed_factor")]
-    pub speed_factor: u8,
-    #[serde(default = "default_gpt_sovits_repetition_penalty")]
-    pub repetition_penalty: f64,
-
-    pub narrator_voice: Option<String>,
-
-    #[serde(default)]
-    pub autofix: bool,
 }
 
 fn default_input() -> String {
@@ -130,38 +59,8 @@ fn default_language() -> String {
 fn default_exclude_locales() -> Vec<String> {
     vec![]
 }
-fn default_retry_count() -> usize {
-    3
-}
-fn default_retry_delay() -> u64 {
-    10
-}
 fn default_tts_provider() -> String {
     "edge-tts".to_string()
-}
-
-fn default_gpt_sovits_base_url() -> String {
-    "https://gsv2p.acgnai.top/".to_string()
-}
-
-fn default_gpt_sovits_top_k() -> i32 {
-    10
-}
-fn default_gpt_sovits_top_p() -> u8 {
-    1
-}
-fn default_gpt_sovits_temperature() -> u8 {
-    1
-}
-fn default_gpt_sovits_speed_factor() -> u8 {
-    1
-}
-fn default_gpt_sovits_repetition_penalty() -> f64 {
-    1.35
-}
-
-fn default_qwen3_base_url() -> String {
-    "http://127.0.0.1:8000".to_string()
 }
 
 impl Config {

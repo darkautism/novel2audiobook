@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::state::CharacterMap;
 use crate::tts::Voice;
 use anyhow::{Context, Ok, Result};
@@ -31,8 +30,14 @@ pub trait ScriptGenerator: Send + Sync {
 pub struct JsonScriptGenerator;
 
 impl JsonScriptGenerator {
-    pub fn new(_config: &Config) -> Self {
+    pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for JsonScriptGenerator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

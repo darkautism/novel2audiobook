@@ -31,7 +31,6 @@ audio:
     style: false
   gpt_sovits:
     token: YourAPIKEY
-    enable_mobs: false
     # 當第二階段文本LLM出現錯誤，是否自動再次修正。你可關閉此功能手動介入修正，可省下一次LLM呼叫的錢。
     autofix: true
     retry: 5
@@ -47,3 +46,4 @@ audio:
     self_host: true
     base_url: http://localhost:8000
     voice_files: kautism/qwen3_tts_voices
+    narrator_voice: 星穹铁道_丹恒

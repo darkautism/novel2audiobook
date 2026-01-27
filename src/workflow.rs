@@ -581,24 +581,6 @@ mod tests {
         }
     }
 
-    fn dummy_config() -> Config {
-        Config {
-            input_folder: "".to_string(),
-            output_folder: "".to_string(),
-            build_folder: "".to_string(),
-            unattended: false,
-            llm: crate::config::LlmConfig {
-                provider: "mock".to_string(),
-                retry_count: 0,
-                retry_delay_seconds: 0,
-                gemini: None,
-                ollama: None,
-                openai: None,
-            },
-            audio: crate::config::AudioConfig::default(),
-        }
-    }
-
     struct MockTtsClient {
         should_fail: bool,
     }
@@ -637,7 +619,7 @@ mod tests {
             "mock voice list".to_string()
         }
         fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-            Box::new(JsonScriptGenerator::new(&dummy_config()))
+            Box::new(JsonScriptGenerator::new())
         }
     }
 
@@ -659,7 +641,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::config::LlmConfig {
+            llm: crate::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -725,7 +707,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::config::LlmConfig {
+            llm: crate::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -796,7 +778,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::config::LlmConfig {
+            llm: crate::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -868,7 +850,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::config::LlmConfig {
+            llm: crate::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -944,7 +926,7 @@ mod tests {
                     .join(" ")
             }
             fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-                Box::new(JsonScriptGenerator::new(&dummy_config()))
+                Box::new(JsonScriptGenerator::new())
             }
         }
 
@@ -1007,7 +989,7 @@ mod tests {
             output_folder: output_dir.to_string_lossy().to_string(),
             build_folder: build_dir.to_string_lossy().to_string(),
             unattended: false,
-            llm: crate::config::LlmConfig {
+            llm: crate::llm::LlmConfig {
                 provider: "mock".to_string(),
                 retry_count: 0,
                 retry_delay_seconds: 0,
@@ -1017,7 +999,7 @@ mod tests {
             },
             audio: crate::config::AudioConfig {
                 provider: "edge-tts".to_string(),
-                edge_tts: Some(crate::config::EdgeTtsConfig {
+                edge_tts: Some(crate::tts::edge::EdgeTtsConfig {
                     narrator_voice: Some("Voice_Narrator".to_string()),
                     ..Default::default()
                 }),
@@ -1102,7 +1084,7 @@ mod tests {
                 "".to_string()
             }
             fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-                Box::new(JsonScriptGenerator::new(&dummy_config()))
+                Box::new(JsonScriptGenerator::new())
             }
         }
 

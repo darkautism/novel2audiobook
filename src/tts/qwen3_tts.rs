@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::script::{AudioSegment, ScriptGenerator};
 use crate::state::CharacterMap;
 use crate::tts::{TtsClient, Voice};
@@ -7,13 +6,30 @@ use async_trait::async_trait;
 use zhconv::{zhconv, Variant};
 use hf_hub::api::tokio::Api;
 use log::{info, warn};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
 
 use crate::qwen3_tts::client::qwen3_tts_infer;
 use crate::qwen3_tts::server::Qwen3Server;
+
+// --- Config ---
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct Qwen3TtsConfig {
+    #[serde(default)]
+    pub self_host: bool,
+    #[serde(default = "default_qwen3_base_url")]
+    pub base_url: String,
+    pub narrator_voice: Option<String>,
+}
+
+fn default_qwen3_base_url() -> String {
+    "http://127.0.0.1:8000".to_string()
+}
+
+// --- Metadata ---
 
 #[derive(Debug, Deserialize, Clone)]
 struct VoiceMetadata {
@@ -25,8 +41,11 @@ struct VoiceMetadata {
 
 type Metadata = HashMap<String, HashMap<String, VoiceMetadata>>;
 
+// --- Client ---
+
 pub struct Qwen3TtsClient {
-    config: Config,
+    config: Qwen3TtsConfig,
+    language: String,
     #[allow(dead_code)]
     server: Option<Qwen3Server>,
     metadata: Metadata,
@@ -34,16 +53,11 @@ pub struct Qwen3TtsClient {
 }
 
 impl Qwen3TtsClient {
-    pub async fn new(config: &Config) -> Result<Self> {
+    pub async fn new(config: Qwen3TtsConfig, language: String) -> Result<Self> {
         info!("Initializing Qwen3 TTS Client...");
-        let qwen_config = config
-            .audio
-            .qwen3_tts
-            .as_ref()
-            .context("Qwen3 TTS config missing")?;
-
+        
         // 1. Start Server if self_host
-        let server = if qwen_config.self_host {
+        let server = if config.self_host {
             let s = Qwen3Server::new();
             s.start().await?;
             Some(s)
@@ -74,9 +88,7 @@ impl Qwen3TtsClient {
         // We flatten this to Voice structs
         for (lang, voices) in &metadata {
             // Only include voices for configured language?
-            // config.audio.language is "zh", "en", etc.
-            // If they match, great.
-            if lang == &config.audio.language {
+            if lang == &language {
                 for (name, data) in voices {
                     voice_list.push(Voice {
                         name: name.clone(),
@@ -90,7 +102,8 @@ impl Qwen3TtsClient {
         }
 
         Ok(Self {
-            config: config.clone(),
+            config,
+            language,
             server,
             metadata,
             voice_list,
@@ -133,8 +146,7 @@ impl TtsClient for Qwen3TtsClient {
         char_map: &CharacterMap,
         _excluded_voices: &[String],
     ) -> Result<Vec<u8>> {
-        let qwen_config = self.config.audio.qwen3_tts.as_ref().unwrap();
-        let base_url = &qwen_config.base_url;
+        let base_url = &self.config.base_url;
 
         // Determine Voice ID
         let voice_id = if let Some(vid) = &segment.voice_id {
@@ -158,7 +170,7 @@ impl TtsClient for Qwen3TtsClient {
         let style = segment.style.as_deref().unwrap_or("中立");
 
         // Check if style exists for this voice
-        let lang = &self.config.audio.language; // "zh"
+        let lang = &self.language;
 
         // Validate style in metadata
         let final_style = if let Some(lang_map) = self.metadata.get(lang) {
@@ -241,7 +253,7 @@ impl TtsClient for Qwen3TtsClient {
     }
 
     async fn get_voice_styles(&self, voice_id: &str) -> Result<Vec<String>> {
-        let lang = &self.config.audio.language;
+        let lang = &self.language;
         if let Some(lang_map) = self.metadata.get(lang) {
             if let Some(v_data) = lang_map.get(voice_id) {
                 return Ok(v_data.emotion.clone());
@@ -252,10 +264,8 @@ impl TtsClient for Qwen3TtsClient {
 
     fn get_narrator_voice_id(&self) -> String {
         self.config
-            .audio
-            .qwen3_tts
-            .as_ref()
-            .and_then(|c| c.narrator_voice.clone())
+            .narrator_voice
+            .clone()
             .unwrap_or_else(|| "default".to_string())
     }
 

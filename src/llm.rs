@@ -1,19 +1,57 @@
-use crate::config::Config;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+// --- Configs ---
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LlmConfig {
+    pub provider: String, // "gemini", "ollama" or "openai"
+    #[serde(default = "default_retry_count")]
+    pub retry_count: usize,
+    #[serde(default = "default_retry_delay")]
+    pub retry_delay_seconds: u64,
+    pub gemini: Option<GeminiConfig>,
+    pub ollama: Option<OllamaConfig>,
+    pub openai: Option<OpenAIConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OpenAIConfig {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeminiConfig {
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OllamaConfig {
+    pub base_url: String,
+    pub model: String,
+}
+
+fn default_retry_count() -> usize {
+    3
+}
+fn default_retry_delay() -> u64 {
+    10
+}
 
 #[async_trait]
 pub trait LlmClient: Send + Sync + Debug {
     async fn chat(&self, system: &str, user: &str) -> Result<String>;
 }
 
-pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
-    let client: Box<dyn LlmClient> = match config.llm.provider.as_str() {
+pub fn create_llm(config: &LlmConfig) -> Result<Box<dyn LlmClient>> {
+    let client: Box<dyn LlmClient> = match config.provider.as_str() {
         "gemini" => {
             let cfg = config
-                .llm
                 .gemini
                 .as_ref()
                 .context("Gemini config missing")?;
@@ -21,7 +59,6 @@ pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
         }
         "ollama" => {
             let cfg = config
-                .llm
                 .ollama
                 .as_ref()
                 .context("Ollama config missing")?;
@@ -29,7 +66,6 @@ pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
         }
         "openai" => {
             let cfg = config
-                .llm
                 .openai
                 .as_ref()
                 .context("OpenAI config missing")?;
@@ -39,13 +75,13 @@ pub fn create_llm(config: &Config) -> Result<Box<dyn LlmClient>> {
                 cfg.base_url.as_deref(),
             ))
         }
-        _ => return Err(anyhow!("Unknown LLM provider: {}", config.llm.provider)),
+        _ => return Err(anyhow!("Unknown LLM provider: {}", config.provider)),
     };
 
     Ok(Box::new(RetryLlmClient {
         inner: client,
-        retry_count: config.llm.retry_count,
-        retry_delay_seconds: config.llm.retry_delay_seconds,
+        retry_count: config.retry_count,
+        retry_delay_seconds: config.retry_delay_seconds,
     }))
 }
 

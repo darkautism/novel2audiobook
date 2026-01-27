@@ -1,10 +1,10 @@
-use crate::config::Config;
 use crate::script::{AudioSegment, JsonScriptGenerator, ScriptGenerator};
 use crate::state::CharacterMap;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 
 use crate::tts::{TtsClient, Voice, VOICE_ID_MOB_FEMALE, VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL};
 
@@ -25,6 +25,17 @@ fn get_sec_ch_ua() -> String {
         "\" Not;A Brand\";v=\"99\", \"Microsoft Edge\";v=\"{}\", \"Chromium\";v=\"{}\"",
         CHROMIUM_MAJOR_VERSION, CHROMIUM_MAJOR_VERSION
     )
+}
+
+// --- Config ---
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct EdgeTtsConfig {
+    pub narrator_voice: Option<String>,
+    pub default_male_voice: Option<String>,
+    pub default_female_voice: Option<String>,
+    #[serde(default)]
+    pub style: bool,
 }
 
 // --- Shared Helper for EdgeTTS ---
@@ -72,12 +83,18 @@ pub async fn list_voices() -> Result<Vec<Voice>> {
 // --- Edge TTS Client ---
 
 pub struct EdgeTtsClient {
-    config: Config,
+    config: EdgeTtsConfig,
+    exclude_locales: Vec<String>,
+    language: String,
     voices_cache: Vec<Voice>,
 }
 
 impl EdgeTtsClient {
-    pub async fn new(config: &Config) -> Result<Self> {
+    pub async fn new(
+        config: EdgeTtsConfig,
+        exclude_locales: Vec<String>,
+        language: String,
+    ) -> Result<Self> {
         // Pre-fetch voices for caching
         let voices_cache = list_voices().await.unwrap_or_else(|e| {
             eprintln!(
@@ -87,21 +104,30 @@ impl EdgeTtsClient {
             Vec::new()
         });
         Ok(Self {
-            config: config.clone(),
+            config,
+            exclude_locales,
+            language,
             voices_cache,
         })
     }
 
     #[cfg(test)]
-    pub fn new_with_voices(config: &Config, voices: Vec<Voice>) -> Self {
+    pub fn new_with_voices(
+        config: EdgeTtsConfig,
+        exclude_locales: Vec<String>,
+        language: String,
+        voices: Vec<Voice>,
+    ) -> Self {
         Self {
-            config: config.clone(),
+            config,
+            exclude_locales,
+            language,
             voices_cache: voices,
         }
     }
 
     pub fn pick_random_voice(&self, gender: Option<&str>, excluded_voices: &[String]) -> String {
-        let lang_prefix = &self.config.audio.language;
+        let lang_prefix = &self.language;
         let mut rng = rand::rng();
 
         let candidates: Vec<&Voice> = self
@@ -111,7 +137,7 @@ impl EdgeTtsClient {
                 if !v.locale.starts_with(lang_prefix) {
                     return false;
                 }
-                if self.config.audio.exclude_locales.contains(&v.locale) {
+                if self.exclude_locales.contains(&v.locale) {
                     return false;
                 }
                 if excluded_voices.contains(&v.short_name) {
@@ -131,10 +157,8 @@ impl EdgeTtsClient {
         } else {
             // Fallback
             self.config
-                .audio
-                .edge_tts
-                .as_ref()
-                .and_then(|c| c.narrator_voice.clone())
+                .narrator_voice
+                .clone()
                 .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
         }
     }
@@ -145,14 +169,12 @@ impl EdgeTtsClient {
         char_map: &CharacterMap,
         excluded_voices: &[String],
     ) -> String {
-        let edge_config = self.config.audio.edge_tts.as_ref();
+        let edge_config = &self.config;
 
         // 1. Check if Narrator
         if speaker == "旁白" || speaker.eq_ignore_ascii_case("Narrator") {
-            if let Some(cfg) = edge_config {
-                if let Some(v) = &cfg.narrator_voice {
-                    return v.clone();
-                }
+            if let Some(v) = &edge_config.narrator_voice {
+                return v.clone();
             }
         }
 
@@ -173,28 +195,24 @@ impl EdgeTtsClient {
             }
 
             // 3. Fallback to Gender Default
-            if let Some(cfg) = edge_config {
-                match info.gender.to_lowercase().as_str() {
-                    "male" => {
-                        if let Some(v) = &cfg.default_male_voice {
-                            return v.clone();
-                        }
+            match info.gender.to_lowercase().as_str() {
+                "male" => {
+                    if let Some(v) = &edge_config.default_male_voice {
+                        return v.clone();
                     }
-                    "female" => {
-                        if let Some(v) = &cfg.default_female_voice {
-                            return v.clone();
-                        }
-                    }
-                    _ => {}
                 }
+                "female" => {
+                    if let Some(v) = &edge_config.default_female_voice {
+                        return v.clone();
+                    }
+                }
+                _ => {}
             }
         }
 
         // 4. Ultimate Fallback (Narrator or first available)
-        if let Some(cfg) = edge_config {
-            if let Some(v) = &cfg.narrator_voice {
-                return v.clone();
-            }
+        if let Some(v) = &edge_config.narrator_voice {
+            return v.clone();
         }
 
         "zh-TW-HsiaoChenNeural".to_string() // Hard fallback
@@ -225,7 +243,7 @@ impl TtsClient for EdgeTtsClient {
         } else {
             panic!("No speaker or voice_id specified for segment");
         };
-        let using_style = self.config.audio.edge_tts.clone().unwrap_or_default().style;
+        let using_style = self.config.style;
         let ssml = match (using_style, &segment.style) {
             (true, Some(style)) =>format!(
                 "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='{}'><mstts:express-as style='{}'>{}</mstts:express-as></voice></speak>",
@@ -255,10 +273,8 @@ impl TtsClient for EdgeTtsClient {
 
     fn get_narrator_voice_id(&self) -> String {
         self.config
-            .audio
-            .edge_tts
-            .as_ref()
-            .and_then(|c| c.narrator_voice.clone())
+            .narrator_voice
+            .clone()
             .unwrap_or_else(|| "zh-TW-HsiaoChenNeural".to_string())
     }
 
@@ -280,40 +296,22 @@ impl TtsClient for EdgeTtsClient {
     }
 
     fn get_script_generator(&self) -> Box<dyn ScriptGenerator> {
-        Box::new(JsonScriptGenerator::new(&self.config))
+        Box::new(JsonScriptGenerator::new())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AudioConfig, EdgeTtsConfig};
 
     #[test]
     fn test_pick_random_voice() {
-        let config = Config {
-            input_folder: "".to_string(),
-            output_folder: "".to_string(),
-            build_folder: "".to_string(),
-            unattended: false,
-            llm: crate::config::LlmConfig {
-                provider: "mock".to_string(),
-                retry_count: 0,
-                retry_delay_seconds: 0,
-                gemini: None,
-                ollama: None,
-                openai: None,
-            },
-            audio: AudioConfig {
-                provider: "edge-tts".to_string(),
-                language: "zh".to_string(),
-                edge_tts: Some(EdgeTtsConfig {
-                    narrator_voice: Some("Narrator".to_string()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
+        let edge_config = EdgeTtsConfig {
+            narrator_voice: Some("Narrator".to_string()),
+            ..Default::default()
         };
+        let exclude_locales = vec!["zh-HK".to_string()];
+        let language = "zh".to_string();
 
         let voices = vec![
             Voice {
@@ -339,7 +337,7 @@ mod tests {
             },
         ];
 
-        let client = EdgeTtsClient::new_with_voices(&config, voices);
+        let client = EdgeTtsClient::new_with_voices(edge_config.clone(), exclude_locales.clone(), language.clone(), voices.clone());
 
         // Test filtering
         let v = client.pick_random_voice(Some("Male"), &[]);
@@ -353,17 +351,13 @@ mod tests {
         assert!(v == "zh-CN-Male" || v == "zh-TW-Female");
 
         // Test Language mismatch
-        // If I change config language to "en"
-        let mut config_en = config.clone();
-        config_en.audio.language = "en".to_string();
-        let client_en = EdgeTtsClient::new_with_voices(&config_en, client.voices_cache.clone());
+        let client_en = EdgeTtsClient::new_with_voices(edge_config.clone(), exclude_locales.clone(), "en".to_string(), voices.clone());
         let v = client_en.pick_random_voice(Some("Male"), &[]);
         assert_eq!(v, "en-US-Male");
 
         // Test Exclude Locales
-        let mut config_ex = config.clone();
-        config_ex.audio.exclude_locales = vec!["zh-TW".to_string()];
-        let client_ex = EdgeTtsClient::new_with_voices(&config_ex, client.voices_cache.clone());
+        let exclude_locales_tw = vec!["zh-TW".to_string()];
+        let client_ex = EdgeTtsClient::new_with_voices(edge_config.clone(), exclude_locales_tw, language.clone(), voices.clone());
 
         // zh-TW-Female should be excluded
         // so if we ask for Female, and only zh-TW-Female is available (which matches lang zh), it should fallback

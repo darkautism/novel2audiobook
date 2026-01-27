@@ -1,10 +1,60 @@
-use crate::config::Config;
 use crate::llm::LlmClient;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
+
+// --- Config ---
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct GptSovitsConfig {
+    pub token: String,
+
+    #[serde(default)]
+    pub retry: i32,
+
+    #[serde(default = "default_gpt_sovits_base_url")]
+    pub base_url: String,
+
+    #[serde(default = "default_gpt_sovits_top_k")]
+    pub top_k: i32,
+    #[serde(default = "default_gpt_sovits_top_p")]
+    pub top_p: u8,
+    #[serde(default = "default_gpt_sovits_temperature")]
+    pub temperature: u8,
+    #[serde(default = "default_gpt_sovits_speed_factor")]
+    pub speed_factor: u8,
+    #[serde(default = "default_gpt_sovits_repetition_penalty")]
+    pub repetition_penalty: f64,
+
+    pub narrator_voice: Option<String>,
+
+    #[serde(default)]
+    pub autofix: bool,
+}
+
+fn default_gpt_sovits_base_url() -> String {
+    "https://gsv2p.acgnai.top/".to_string()
+}
+
+fn default_gpt_sovits_top_k() -> i32 {
+    10
+}
+fn default_gpt_sovits_top_p() -> u8 {
+    1
+}
+fn default_gpt_sovits_temperature() -> u8 {
+    1
+}
+fn default_gpt_sovits_speed_factor() -> u8 {
+    1
+}
+fn default_gpt_sovits_repetition_penalty() -> f64 {
+    1.35
+}
+
+// --- Metadata ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GptSovitsVoiceMetadata {
@@ -31,10 +81,11 @@ struct LlmVoiceInfo {
 }
 
 pub async fn load_or_refresh_metadata(
-    config: &Config,
+    config: &GptSovitsConfig,
+    language: &str,
     llm: Option<&dyn LlmClient>,
 ) -> Result<GptSovitsVoiceMap> {
-    let url = url::Url::parse(&config.audio.gpt_sovits.as_ref().unwrap().base_url.clone()).unwrap();
+    let url = url::Url::parse(&config.base_url).unwrap();
     let filename = url.host_str().unwrap_or("").to_string() + ".json";
     let file_path = Path::new(&filename);
     let local_map: GptSovitsVoiceMap = if file_path.exists() {
@@ -45,19 +96,14 @@ pub async fn load_or_refresh_metadata(
         // 1. Fetch API
         let mut local_map: GptSovitsVoiceMap = HashMap::new();
         let client = reqwest::Client::new();
-        let url = config.audio.gpt_sovits.clone().unwrap().base_url + "models/v4";
+        let url = config.base_url.clone() + "models/v4";
 
         // If GPT-SoVITS is not configured or URL is empty, return empty map
         if url.is_empty() {
             return Ok(HashMap::new());
         }
 
-        let token = config
-            .audio
-            .gpt_sovits
-            .as_ref()
-            .map(|c| c.token.clone())
-            .unwrap_or_default();
+        let token = config.token.clone();
 
         let mut req = client.get(&url);
         if !token.is_empty() {
@@ -88,7 +134,7 @@ pub async fn load_or_refresh_metadata(
                      Use Traditional Chinese for tags.\n\
                      Ensure the JSON is valid.",
                      chunk,
-                     config.audio.language,
+                     language,
                  );
 
                 match llm_client

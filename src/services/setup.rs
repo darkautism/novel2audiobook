@@ -102,6 +102,45 @@ pub async fn run_setup(config: &mut Config, llm: Option<&dyn LlmClient>) -> Resu
                 }
             }
         }
+        "qwen3_tts" => {
+            if config.audio.qwen3_tts.is_none() {
+                config.audio.qwen3_tts = Some(crate::services::tts::qwen3_tts::Qwen3TtsConfig {
+                    self_host: true,
+                    base_url: "http://127.0.0.1:8000".to_string(),
+                    narrator_voice: None,
+                });
+            }
+
+            let setup_needed = {
+                let cfg = config.audio.qwen3_tts.as_ref().unwrap();
+                cfg.narrator_voice.is_none()
+            };
+
+            if setup_needed {
+                println!("Fetching Qwen3-TTS voices...");
+                let voices = fetch_voice_list(config, llm).await?;
+                let lang = &config.audio.language;
+                let filtered_voices: Vec<Voice> = voices
+                    .into_iter()
+                    .filter(|v| v.locale.starts_with(lang))
+                    .collect();
+
+                if filtered_voices.is_empty() {
+                    return Err(anyhow!("No voices found for language: {}", lang));
+                }
+
+                let cfg = config.audio.qwen3_tts.as_mut().unwrap();
+
+                if cfg.narrator_voice.is_none() {
+                    cfg.narrator_voice = Some(select_voice(
+                        "Select Narrator Voice:",
+                        &filtered_voices,
+                        |_| true,
+                    )?);
+                    needs_save = true;
+                }
+            }
+        }
         _ => {
             println!("Setup not implemented for provider: {}", provider);
         }

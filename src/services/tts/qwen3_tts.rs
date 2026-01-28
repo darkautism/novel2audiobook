@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
+use url::Url;
 use zhconv::{zhconv, Variant};
 
 // --- Config ---
@@ -124,9 +126,28 @@ async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
 
         if !target_path.exists() {
             info!("Downloading {}...", filename);
-            let path = repo.get(&filename).await?;
-            // hf-hub stores in cache. We need to copy it to target_dir.
-            fs::copy(path, target_path).await?;
+
+            // Create parent directories if needed
+            if let Some(parent) = target_path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent).await?;
+                }
+            }
+
+            // Manual download to avoid hf-hub panic with CJK filenames
+            let mut url = Url::parse("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main/")?;
+            url.path_segments_mut()
+                .map_err(|_| anyhow!("Invalid URL"))?
+                .push(&filename);
+
+            let response = reqwest::get(url).await?;
+            if !response.status().is_success() {
+                return Err(anyhow!("Failed to download {}: {}", filename, response.status()));
+            }
+
+            let content = response.bytes().await?;
+            let mut file = fs::File::create(&target_path).await?;
+            file.write_all(&content).await?;
         }
     }
 

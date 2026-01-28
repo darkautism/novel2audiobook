@@ -5,7 +5,6 @@ use crate::services::tts::qwen3_api::server::Qwen3Server;
 use crate::services::tts::{TtsClient, Voice};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use hf_hub::api::tokio::Api;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -113,16 +112,39 @@ impl Qwen3TtsClient {
 }
 
 async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
-    let api = Api::new()?;
-    let repo = api.model("kautism/qwen3_tts_voices".to_string());
+    info!("Checking voice files from HuggingFace...");
 
-    // Get list of files
-    // Note: info() retrieves repo info including siblings
-    let info = repo.info().await?;
+    let url = "https://huggingface.co/api/models/kautism/qwen3_tts_voices";
+    let client = reqwest::Client::new();
+    let response = client.get(url).send().await?;
 
-    for file in info.siblings {
-        let filename = file.rfilename;
-        let target_path = target_dir.join(&filename);
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to fetch voice list: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    let siblings = json["siblings"]
+        .as_array()
+        .ok_or_else(|| anyhow!("Invalid response from HF API: 'siblings' field missing"))?;
+
+    for file in siblings {
+        let filename = file["rfilename"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid filename in response"))?;
+
+        // Basic path sanitation
+        if filename.contains("..") || filename.starts_with('/') {
+            warn!("Skipping suspicious filename: {}", filename);
+            continue;
+        }
+
+        let target_path = target_dir.join(filename);
+
+        // Additional check to ensure we don't write outside target_dir
+        if !target_path.starts_with(target_dir) {
+            warn!("Skipping path traversal attempt: {}", filename);
+            continue;
+        }
 
         if !target_path.exists() {
             info!("Downloading {}...", filename);
@@ -136,11 +158,15 @@ async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
 
             // Manual download to avoid hf-hub panic with CJK filenames
             let mut url = Url::parse("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main/")?;
-            url.path_segments_mut()
-                .map_err(|_| anyhow!("Invalid URL"))?
-                .push(&filename);
 
-            let response = reqwest::get(url).await?;
+            {
+                let mut segments = url.path_segments_mut().map_err(|_| anyhow!("Invalid URL"))?;
+                for part in filename.split('/') {
+                    segments.push(part);
+                }
+            }
+
+            let response = client.get(url.clone()).send().await?;
             if !response.status().is_success() {
                 return Err(anyhow!("Failed to download {}: {}", filename, response.status()));
             }

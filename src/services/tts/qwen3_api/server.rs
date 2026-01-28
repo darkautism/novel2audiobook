@@ -52,8 +52,13 @@ impl Qwen3Server {
         }).await??;
 
         info!(">>> 正在啟動 Qwen-TTS Demo...");
-        let scripts_dir = python_bin.parent().unwrap().join("Scripts");
-        let demo = scripts_dir.join("qwen-tts-demo.exe");
+
+        let (script_dir, executable) = if cfg!(windows) {
+            (python_bin.parent().unwrap().join("Scripts"), "qwen-tts-demo.exe")
+        } else {
+            (python_bin.parent().unwrap().to_path_buf(), "qwen-tts-demo")
+        };
+        let demo = script_dir.join(executable);
 
         let mut cmd = Command::new(&demo);
         cmd.arg("Qwen/Qwen3-TTS-12Hz-1.7B-Base")
@@ -119,9 +124,8 @@ impl Qwen3Server {
 // --- Helper Functions ---
 
 fn install_dependencies(python_bin: &Path) -> Result<()> {
-    // 4.1 安裝 PyTorch (CUDA 12.4)
-    info!(">>> [1/3] 檢查並安裝 PyTorch 2.6.0 (CUDA 12.4)...");
-    install_torch_cuda_124(python_bin)?;
+    // 4.1 安裝 PyTorch
+    install_torch(python_bin)?;
 
     // 4.2 安裝 Flash Attention (Windows 特規)
     info!(">>> [2/3] 檢查並安裝 Flash Attention...");
@@ -151,6 +155,10 @@ fn get_download_url() -> Result<String> {
         ),
         ("linux", "x86_64") => format!(
             "cpython-{}+{}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+            PYTHON_VERSION_TAG, PYTHON_RELEASE_TAG
+        ),
+        ("linux", "aarch64") => format!(
+            "cpython-{}+{}-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
             PYTHON_VERSION_TAG, PYTHON_RELEASE_TAG
         ),
         ("macos", "aarch64") => format!(
@@ -269,13 +277,22 @@ fn install_package(
     }
 }
 
-fn install_torch_cuda_124(python_bin: &Path) -> Result<()> {
+fn install_torch(python_bin: &Path) -> Result<()> {
     if is_package_installed(python_bin, "torch") {
         info!("Torch 已安裝，跳過。");
         return Ok(());
     }
 
-    info!("正在下載並安裝 PyTorch 2.6.0 (CUDA 12.4)...");
+    let arch = env::consts::ARCH;
+    let os = env::consts::OS;
+
+    let (index_url, log_msg) = if os == "linux" && arch == "aarch64" {
+        ("https://download.pytorch.org/whl/cpu", "PyTorch 2.6.0 (CPU for ARM)")
+    } else {
+        ("https://download.pytorch.org/whl/cu124", "PyTorch 2.6.0 (CUDA 12.4)")
+    };
+
+    info!(">>> [1/3] 檢查並安裝 {}...", log_msg);
     let status = StdCommand::new(python_bin)
         .arg("-I")
         .arg("-m")
@@ -285,7 +302,7 @@ fn install_torch_cuda_124(python_bin: &Path) -> Result<()> {
         .arg("torchvision")
         .arg("torchaudio")
         .arg("--index-url")
-        .arg("https://download.pytorch.org/whl/cu124")
+        .arg(index_url)
         .status()
         .context("PyTorch 安裝失敗")?;
 
@@ -297,6 +314,11 @@ fn install_torch_cuda_124(python_bin: &Path) -> Result<()> {
 }
 
 fn install_flash_attn_conditional(python_bin: &Path) -> Result<()> {
+    if env::consts::ARCH == "aarch64" {
+        warn!("偵測到 ARM 架構，跳過 Flash Attention 安裝 (不支援)。");
+        return Ok(());
+    }
+
     if is_package_installed(python_bin, "flash-attn") {
         info!("Flash Attention 已安裝，跳過。");
         return Ok(());

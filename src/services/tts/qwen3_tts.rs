@@ -135,14 +135,18 @@ async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
             }
 
             // Manual download to avoid hf-hub panic with CJK filenames
-            let mut url = Url::parse("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main/")?;
-            url.path_segments_mut()
-                .map_err(|_| anyhow!("Invalid URL"))?
-                .push(&filename);
+            let mut url = Url::parse("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main")?;
+            {
+                let mut segments = url.path_segments_mut()
+                    .map_err(|_| anyhow!("Invalid URL"))?;
+                for part in filename.split('/') {
+                    segments.push(part);
+                }
+            }
 
-            let response = reqwest::get(url).await?;
+            let response = reqwest::get(url.clone()).await?;
             if !response.status().is_success() {
-                return Err(anyhow!("Failed to download {}: {}", filename, response.status()));
+                return Err(anyhow!("Failed to download {} from {}: {}", filename, url, response.status()));
             }
 
             let content = response.bytes().await?;

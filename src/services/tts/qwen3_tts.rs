@@ -15,17 +15,34 @@ use zhconv::{zhconv, Variant};
 
 // --- Config ---
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Qwen3TtsConfig {
     #[serde(default)]
     pub self_host: bool,
     #[serde(default = "default_qwen3_base_url")]
     pub base_url: String,
     pub narrator_voice: Option<String>,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+}
+
+impl Default for Qwen3TtsConfig {
+    fn default() -> Self {
+        Self {
+            self_host: false,
+            base_url: default_qwen3_base_url(),
+            narrator_voice: None,
+            concurrency: default_concurrency(),
+        }
+    }
 }
 
 fn default_qwen3_base_url() -> String {
     "http://127.0.0.1:8000".to_string()
+}
+
+fn default_concurrency() -> usize {
+    1
 }
 
 // --- Metadata ---
@@ -297,5 +314,9 @@ impl TtsClient for Qwen3TtsClient {
         output: &std::path::Path,
     ) -> Result<()> {
         crate::utils::audio::merge_wav_files(inputs, output)
+    }
+
+    fn max_concurrency(&self) -> usize {
+        self.config.concurrency
     }
 }

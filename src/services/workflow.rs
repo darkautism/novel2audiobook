@@ -505,6 +505,7 @@ impl WorkflowManager {
         let working_map_ref = &working_map;
         let excluded_voices_ref = &excluded_voices;
 
+        let max_concurrency = tts.max_concurrency();
         let results: Vec<Result<(usize, PathBuf)>> = futures_util::stream::iter(segments.iter().enumerate())
             .map(|(i, segment)| {
                 let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
@@ -518,7 +519,7 @@ impl WorkflowManager {
                     Ok((i, chunk_path))
                 }
             })
-            .buffer_unordered(5)
+            .buffer_unordered(max_concurrency)
             .collect()
             .await;
 

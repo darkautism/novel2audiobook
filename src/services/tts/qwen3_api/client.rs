@@ -2,7 +2,8 @@ use futures_util::StreamExt;
 use reqwest::{multipart, Client};
 use serde_json::{json, Value};
 use anyhow::{Result, Context, anyhow};
-use log::debug;
+use log::{debug, warn};
+use tokio::time::{sleep, Duration};
 
 /// Qwen3 TTS 推論函式
 /// 
@@ -19,6 +20,7 @@ pub async fn qwen3_tts_infer(
     let client = Client::new();
 
     // --- 第一步：上傳檔案 ---
+    // 這一步只做一次，因為檔案上傳後路徑應該是穩定的 (或至少短期有效)
     debug!("正在讀取並上傳檔案: {}", voice_file_path);
     let file_content = tokio::fs::read(voice_file_path).await.context("Failed to read voice file")?;
     let part = multipart::Part::bytes(file_content)
@@ -41,6 +43,35 @@ pub async fn qwen3_tts_infer(
     let uploaded_server_path = upload_resp.first().ok_or(anyhow!("Upload failed: empty response"))?;
     debug!("檔案已上傳至伺服器: {}", uploaded_server_path);
 
+    // 重試機制
+    let max_retries = 3;
+    let mut last_error = anyhow!("Unknown error");
+
+    for attempt in 0..max_retries {
+        if attempt > 0 {
+            warn!("Qwen3 TTS 生成失敗 (嘗試 {}/{})，正在重試...", attempt + 1, max_retries);
+            sleep(Duration::from_secs(2)).await;
+        }
+
+        match try_generate_and_download(&client, base_url, uploaded_server_path, text, language).await {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) => {
+                warn!("Qwen3 TTS 生成錯誤: {:#}", e);
+                last_error = e;
+            }
+        }
+    }
+
+    Err(last_error.context("Qwen3 TTS 生成在重試後仍然失敗"))
+}
+
+async fn try_generate_and_download(
+    client: &Client,
+    base_url: &str,
+    uploaded_server_path: &str,
+    text: &str,
+    language: &str,
+) -> Result<Vec<u8>> {
     // --- 第二步：提交生成任務 ---
     debug!("正在提交生成請求...");
     let gen_url = format!("{}/gradio_api/call/load_prompt_and_gen", base_url);

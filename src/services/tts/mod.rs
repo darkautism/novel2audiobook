@@ -66,6 +66,10 @@ pub trait TtsClient: Send + Sync {
     ) -> Result<()> {
         crate::utils::audio::merge_binary_files(inputs, output)
     }
+
+    fn max_concurrency(&self) -> usize {
+        5
+    }
 }
 
 pub async fn fetch_voice_list(

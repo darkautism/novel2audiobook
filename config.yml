@@ -44,6 +44,7 @@ audio:
     narrator_voice: 星穹铁道-中文-丹恒
   qwen3_tts:
     self_host: true
+    # device: cpu    # if your device does not support CUDA, uncomment this line to use CPU
     concurrency: 2
     base_url: http://localhost:8000
     voice_files: kautism/qwen3_tts_voices

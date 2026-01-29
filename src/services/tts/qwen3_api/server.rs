@@ -6,9 +6,11 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdStdio};
 use std::sync::Arc;
-use tokio::process::{Command, Child};
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
+
+use crate::services::tts::qwen3_tts::Qwen3TtsConfig;
 
 // 定義 Python 版本常數
 const PYTHON_RELEASE_TAG: &str = "20260114";
@@ -17,18 +19,20 @@ const PYTHON_VERSION_TAG: &str = "3.10.19";
 #[derive(Clone)]
 pub struct Qwen3Server {
     child: Arc<RwLock<Option<Child>>>,
+    config: Qwen3TtsConfig,
 }
 
 impl Default for Qwen3Server {
     fn default() -> Self {
-        Self::new()
+        Self::new(Qwen3TtsConfig::default())
     }
 }
 
 impl Qwen3Server {
-    pub fn new() -> Self {
+    pub fn new(config: Qwen3TtsConfig) -> Self {
         Self {
             child: Arc::new(RwLock::new(None)),
+            config,
         }
     }
 
@@ -47,14 +51,16 @@ impl Qwen3Server {
 
         // 安裝依賴 (Blocking)
         let python_bin_clone = python_bin.clone();
-        tokio::task::spawn_blocking(move || {
-            install_dependencies(&python_bin_clone)
-        }).await??;
+        let config_clone = self.config.clone();
+        tokio::task::spawn_blocking(move || install_dependencies(&python_bin_clone, &config_clone)).await??;
 
         info!(">>> 正在啟動 Qwen-TTS Demo...");
 
         let (script_dir, executable) = if cfg!(windows) {
-            (python_bin.parent().unwrap().join("Scripts"), "qwen-tts-demo.exe")
+            (
+                python_bin.parent().unwrap().join("Scripts"),
+                "qwen-tts-demo.exe",
+            )
         } else {
             (python_bin.parent().unwrap().to_path_buf(), "qwen-tts-demo")
         };
@@ -62,14 +68,20 @@ impl Qwen3Server {
 
         let mut cmd = Command::new(&demo);
         cmd.arg("Qwen/Qwen3-TTS-12Hz-1.7B-Base")
-           .arg("--ip")
-           .arg("0.0.0.0")
-           .arg("--port")
-           .arg("8000")
-           .env("PYTHONUNBUFFERED", "1")
-           .stdout(StdStdio::piped())
-           .stderr(StdStdio::piped())
-           .kill_on_drop(true);
+            .arg("--ip")
+            .arg("0.0.0.0")
+            .arg("--port")
+            .arg("8000")
+            .arg("--concurrency")
+            .arg(format!("{}", self.config.concurrency))
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(StdStdio::piped())
+            .stderr(StdStdio::piped())
+            .kill_on_drop(true);
+
+        if let Some(device) = &self.config.device {
+            cmd.arg("--device").arg(device).arg("--no-flash-attn");
+        }
 
         let mut child = cmd.spawn().context("執行 qwen-tts 失敗")?;
 
@@ -106,7 +118,8 @@ impl Qwen3Server {
         });
 
         info!(">>> 等待 Qwen-TTS Server 啟動...");
-        rx.await.context("Server failed to start or closed unexpectedly")?;
+        rx.await
+            .context("Server failed to start or closed unexpectedly")?;
         info!(">>> Qwen-TTS Server 已啟動！");
 
         Ok(())
@@ -114,22 +127,24 @@ impl Qwen3Server {
 
     #[allow(dead_code)]
     pub async fn stop(&self) {
-         let mut lock = self.child.write().await;
-         if let Some(mut child) = lock.take() {
-             let _ = child.kill().await;
-         }
+        let mut lock = self.child.write().await;
+        if let Some(mut child) = lock.take() {
+            let _ = child.kill().await;
+        }
     }
 }
 
 // --- Helper Functions ---
 
-fn install_dependencies(python_bin: &Path) -> Result<()> {
+fn install_dependencies(python_bin: &Path, config: &Qwen3TtsConfig) -> Result<()> {
     // 4.1 安裝 PyTorch
-    install_torch(python_bin)?;
+    install_torch(python_bin, config)?;
 
-    // 4.2 安裝 Flash Attention (Windows 特規)
-    info!(">>> [2/3] 檢查並安裝 Flash Attention...");
-    install_flash_attn_conditional(python_bin)?;
+    if !matches!(config.device.as_deref(), Some("cpu")) {
+        // 4.2 安裝 Flash Attention (Windows 特規)
+        info!(">>> [2/3] 檢查並安裝 Flash Attention...");
+        install_flash_attn_conditional(python_bin)?;
+    }
 
     // 4.3 安裝 Qwen-TTS
     info!(">>> [3/3] 檢查並安裝 Qwen-TTS...");
@@ -277,19 +292,22 @@ fn install_package(
     }
 }
 
-fn install_torch(python_bin: &Path) -> Result<()> {
+fn install_torch(python_bin: &Path, config: &Qwen3TtsConfig) -> Result<()> {
     if is_package_installed(python_bin, "torch") {
         info!("Torch 已安裝，跳過。");
         return Ok(());
     }
 
-    let arch = env::consts::ARCH;
-    let os = env::consts::OS;
-
-    let (index_url, log_msg) = if os == "linux" && arch == "aarch64" {
-        ("https://download.pytorch.org/whl/cpu", "PyTorch 2.6.0 (CPU for ARM)")
+    let (index_url, log_msg) = if matches!(config.device.as_deref(), Some("cpu")) {
+        (
+            "https://download.pytorch.org/whl/cpu",
+            "PyTorch 2.6.0 (CPU for ARM)",
+        )
     } else {
-        ("https://download.pytorch.org/whl/cu124", "PyTorch 2.6.0 (CUDA 12.4)")
+        (
+            "https://download.pytorch.org/whl/cu124",
+            "PyTorch 2.6.0 (CUDA 12.4)",
+        )
     };
 
     info!(">>> [1/3] 檢查並安裝 {}...", log_msg);
@@ -314,11 +332,6 @@ fn install_torch(python_bin: &Path) -> Result<()> {
 }
 
 fn install_flash_attn_conditional(python_bin: &Path) -> Result<()> {
-    if env::consts::ARCH == "aarch64" {
-        warn!("偵測到 ARM 架構，跳過 Flash Attention 安裝 (不支援)。");
-        return Ok(());
-    }
-
     if is_package_installed(python_bin, "flash-attn") {
         info!("Flash Attention 已安裝，跳過。");
         return Ok(());

@@ -109,6 +109,7 @@ pub async fn run_setup(config: &mut Config, llm: Option<&dyn LlmClient>) -> Resu
                     base_url: "http://127.0.0.1:8000".to_string(),
                     narrator_voice: None,
                     concurrency: 1,
+                    device: None,
                 });
             }
 

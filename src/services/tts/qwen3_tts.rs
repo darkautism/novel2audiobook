@@ -24,6 +24,7 @@ pub struct Qwen3TtsConfig {
     pub narrator_voice: Option<String>,
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
+    pub device: Option<String>,
 }
 
 impl Default for Qwen3TtsConfig {
@@ -33,6 +34,7 @@ impl Default for Qwen3TtsConfig {
             base_url: default_qwen3_base_url(),
             narrator_voice: None,
             concurrency: default_concurrency(),
+            device: None,
         }
     }
 }
@@ -74,7 +76,7 @@ impl Qwen3TtsClient {
         
         // 1. Start Server if self_host
         let server = if config.self_host {
-            let s = Qwen3Server::new();
+            let s = Qwen3Server::new(config.clone());
             s.start().await?;
             Some(s)
         } else {

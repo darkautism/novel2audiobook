@@ -18,7 +18,7 @@ llm:
     model: gpt-4o
     base_url: https://api.openai.com/v1
 audio:
-  provider: edge-tts
+  provider: qwen3_tts
   language: zh
   # HK的聲音製作中文語音的效果很差，先排除
   exclude_locales:

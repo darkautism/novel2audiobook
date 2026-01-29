@@ -100,10 +100,7 @@ impl Qwen3TtsClient {
 
         // 5. Build Voice List
         let mut voice_list = Vec::new();
-        // Assume structure {"zh": {"Name": ...}}
-        // We flatten this to Voice structs
         for (lang, voices) in &metadata {
-            // Only include voices for configured language?
             if lang == &language {
                 for (name, data) in voices {
                     voice_list.push(Voice {
@@ -128,11 +125,9 @@ impl Qwen3TtsClient {
 }
 
 async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
+    info!("Checking voice files from HuggingFace via hf-hub...");
     let api = Api::new()?;
     let repo = api.model("kautism/qwen3_tts_voices".to_string());
-
-    // Get list of files
-    // Note: info() retrieves repo info including siblings
     let info = repo.info().await?;
 
     for file in info.siblings {
@@ -142,7 +137,12 @@ async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
         if !target_path.exists() {
             info!("Downloading {}...", filename);
             let path = repo.get(&filename).await?;
-            // hf-hub stores in cache. We need to copy it to target_dir.
+            
+            if let Some(parent) = target_path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent).await?;
+                }
+            }
             fs::copy(path, target_path).await?;
         }
     }
@@ -164,7 +164,6 @@ impl TtsClient for Qwen3TtsClient {
     ) -> Result<Vec<u8>> {
         let base_url = &self.config.base_url;
 
-        // Determine Voice ID
         let voice_id = if let Some(vid) = &segment.voice_id {
             vid.clone()
         } else if let Some(speaker) = &segment.speaker {
@@ -178,23 +177,17 @@ impl TtsClient for Qwen3TtsClient {
                 self.get_narrator_voice_id()
             }
         } else {
-            // Narrator
             self.get_narrator_voice_id()
         };
 
-        // Determine Style
         let style = segment.style.as_deref().unwrap_or("中立");
-
-        // Check if style exists for this voice
         let lang = &self.language;
 
-        // Validate style in metadata
         let final_style = if let Some(lang_map) = self.metadata.get(lang) {
             if let Some(v_data) = lang_map.get(&voice_id) {
                 if v_data.emotion.iter().any(|e| e == style) {
                     style.to_string()
                 } else {
-                    // Fallback to first emotion or "中立"
                     v_data
                         .emotion
                         .first()
@@ -208,8 +201,6 @@ impl TtsClient for Qwen3TtsClient {
             style.to_string()
         };
 
-        // Construct .pt filename
-        // Format: {lang}-{voice_id}-{style}.pt
         let filename = format!("{}-{}-{}.pt", lang, voice_id, final_style);
         let file_path = Path::new("qwen3_tts_voices").join(&filename);
 
@@ -217,11 +208,10 @@ impl TtsClient for Qwen3TtsClient {
             return Err(anyhow!("Voice file not found: {:?}", file_path));
         }
 
-        // Call infer
         let infer_lang = match lang.as_str() {
             "zh" => "Chinese",
             "en" => "English",
-            _ => "Chinese", // Default
+            _ => "Chinese", 
         };
 
         let text = if infer_lang == "Chinese" {

@@ -6,14 +6,14 @@ use crate::services::tts::{
     TtsClient, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
     VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
 };
+use crate::core::io::Storage;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
-use tokio::fs as tokio_fs;
+use std::sync::Arc;
 
 pub struct WorkflowManager {
     config: Config,
@@ -22,12 +22,13 @@ pub struct WorkflowManager {
     character_map: CharacterMap,
     tts: Box<dyn TtsClient>,
     script_generator: Box<dyn ScriptGenerator>,
+    storage: Arc<dyn Storage>,
 }
 
 impl WorkflowManager {
-    pub fn new(config: Config, llm: Box<dyn LlmClient>, tts: Box<dyn TtsClient>) -> Result<Self> {
-        let state = Self::load_state(&config.build_folder)?;
-        let mut character_map = Self::load_character_map(&config.build_folder)?;
+    pub async fn new(config: Config, llm: Box<dyn LlmClient>, tts: Box<dyn TtsClient>, storage: Arc<dyn Storage>) -> Result<Self> {
+        let state = Self::load_state(&config.build_folder, storage.as_ref()).await?;
+        let mut character_map = Self::load_character_map(&config.build_folder, storage.as_ref()).await?;
 
         let enable_mobs = tts.is_mob_enabled();
 
@@ -47,7 +48,6 @@ impl WorkflowManager {
                 );
                 map_updated = true;
             }
-            // Chapter Mobs
             if !character_map.characters.contains_key("章節路人(男)") {
                 character_map.characters.insert(
                     "章節路人(男)".to_string(),
@@ -99,10 +99,8 @@ impl WorkflowManager {
 
             if map_updated {
                 let path = Path::new(&config.build_folder).join("character_map.json");
-                // Ensure build dir exists (it might not if it's the first run)
-                fs::create_dir_all(&config.build_folder)?;
                 let content = serde_json::to_string_pretty(&character_map)?;
-                fs::write(path, content)?;
+                storage.write(path.to_str().unwrap(), content.as_bytes()).await?;
             }
         }
 
@@ -115,30 +113,35 @@ impl WorkflowManager {
             character_map,
             tts,
             script_generator,
+            storage,
         })
     }
 
-    fn load_state(build_dir: &str) -> Result<WorkflowState> {
+    async fn load_state(build_dir: &str, storage: &dyn Storage) -> Result<WorkflowState> {
         let path = Path::new(build_dir).join("state.json");
-        if path.exists() {
-            let content = fs::read_to_string(path)?;
+        let path_str = path.to_str().unwrap();
+        if storage.exists(path_str).await? {
+            let bytes = storage.read(path_str).await?;
+            let content = String::from_utf8(bytes)?;
             Ok(serde_json::from_str(&content)?)
         } else {
             Ok(WorkflowState::default())
         }
     }
 
-    fn save_state(&self) -> Result<()> {
+    async fn save_state(&self) -> Result<()> {
         let path = Path::new(&self.config.build_folder).join("state.json");
         let content = serde_json::to_string_pretty(&self.state)?;
-        fs::write(path, content)?;
+        self.storage.write(path.to_str().unwrap(), content.as_bytes()).await?;
         Ok(())
     }
 
-    fn load_character_map(build_dir: &str) -> Result<CharacterMap> {
+    async fn load_character_map(build_dir: &str, storage: &dyn Storage) -> Result<CharacterMap> {
         let path = Path::new(build_dir).join("character_map.json");
-        if path.exists() {
-            let content = fs::read_to_string(path)?;
+        let path_str = path.to_str().unwrap();
+        if storage.exists(path_str).await? {
+            let bytes = storage.read(path_str).await?;
+            let content = String::from_utf8(bytes)?;
             Ok(serde_json::from_str(&content)?)
         } else {
             Ok(CharacterMap {
@@ -147,29 +150,25 @@ impl WorkflowManager {
         }
     }
 
-    fn save_character_map(&self) -> Result<()> {
+    async fn save_character_map(&self) -> Result<()> {
         let path = Path::new(&self.config.build_folder).join("character_map.json");
         let content = serde_json::to_string_pretty(&self.character_map)?;
-        fs::write(path, content)?;
+        self.storage.write(path.to_str().unwrap(), content.as_bytes()).await?;
         Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {
         // List input files
-        let input_path = Path::new(&self.config.input_folder);
-        let mut entries = Vec::new();
-        let mut dir = tokio_fs::read_dir(input_path).await?;
-        while let Some(entry) = dir.next_entry().await? {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "txt") {
-                entries.push(path);
-            }
-        }
+        let entries = self.storage.list(&self.config.input_folder).await?;
+        let mut txt_entries: Vec<String> = entries.into_iter()
+            .filter(|e| e.ends_with(".txt"))
+            .collect();
 
-        entries.sort();
-        let total_chapters = entries.len();
+        txt_entries.sort();
+        let total_chapters = txt_entries.len();
 
-        for (i, path) in entries.iter().enumerate() {
+        for (i, path_str) in txt_entries.iter().enumerate() {
+            let path = Path::new(path_str);
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
 
             if self.state.completed_chapters.contains(&filename) {
@@ -178,25 +177,28 @@ impl WorkflowManager {
             }
 
             println!("Processing chapter: {}", filename);
-            self.process_chapter(path, &filename).await?;
+            self.process_chapter(path_str, &filename).await?;
 
             self.state.completed_chapters.push(filename);
-            self.save_state()?;
+            self.save_state().await?;
 
             if !self.config.unattended && i < total_chapters - 1 {
-                let ans = inquire::Confirm::new("Continue to next chapter?")
-                    .with_default(true)
-                    .prompt();
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let ans = inquire::Confirm::new("Continue to next chapter?")
+                        .with_default(true)
+                        .prompt();
 
-                match ans {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        println!("Stopping as requested.");
-                        break;
-                    }
-                    Err(_) => {
-                        println!("Error reading input, stopping.");
-                        break;
+                    match ans {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            println!("Stopping as requested.");
+                            break;
+                        }
+                        Err(_) => {
+                            println!("Error reading input, stopping.");
+                            break;
+                        }
                     }
                 }
             }
@@ -206,27 +208,29 @@ impl WorkflowManager {
         Ok(())
     }
 
-    async fn process_chapter(&mut self, path: &Path, filename: &str) -> Result<()> {
-        let text = fs::read_to_string(path)?;
+    async fn process_chapter(&mut self, path_str: &str, filename: &str) -> Result<()> {
+        let bytes = self.storage.read(path_str).await?;
+        let text = String::from_utf8(bytes)?;
 
         let chapter_build_dir =
             Path::new(&self.config.build_folder).join(filename.replace(".", "_"));
-        fs::create_dir_all(&chapter_build_dir)?;
+        
         let segments_path = chapter_build_dir.join("segments.json");
+        let segments_path_str = segments_path.to_str().unwrap();
 
-        // Prepare voices for Analysis & Script Generation
+        // Prepare voices
         let mut voices = self.tts.list_voices().await?;
         voices.retain(|v| {
             v.locale.starts_with(&self.config.audio.language)
                 && !self.config.audio.exclude_locales.contains(&v.locale)
         });
 
-        let mut segments: Vec<AudioSegment> = if segments_path.exists() {
+        let mut segments: Vec<AudioSegment> = if self.storage.exists(segments_path_str).await? {
             println!("Loading cached segments from {:?}", segments_path);
-            let content = fs::read_to_string(&segments_path)?;
+            let bytes = self.storage.read(segments_path_str).await?;
+            let content = String::from_utf8(bytes)?;
             serde_json::from_str(&content)?
         } else {
-            // 1. Analyze Characters
             println!("Analyzing characters...");
 
             let existing_chars_str = self
@@ -279,9 +283,8 @@ impl WorkflowManager {
                 .chat("你是一位文學助手。請僅返回有效的 JSON。", &analysis_prompt)
                 .await?;
 
-            analysis_json = analysis_json.replace("\n", ""); // Clean newlines
+            analysis_json = analysis_json.replace("\n", ""); 
 
-            // Parse JSON
             #[derive(Deserialize)]
             struct AnalysisResult {
                 characters: Vec<AnalysisChar>,
@@ -291,7 +294,7 @@ impl WorkflowManager {
                 name: String,
                 gender: String,
                 #[serde(default)]
-                important: bool, // Renamed from _important to allow usage
+                important: bool,
                 #[serde(default)]
                 description: Option<String>,
                 #[serde(default)]
@@ -300,30 +303,19 @@ impl WorkflowManager {
                 is_protagonist: bool,
             }
 
-            // Clean markdown code blocks if present
             let clean_json = strip_code_blocks(&analysis_json);
             let analysis: AnalysisResult = serde_json::from_str(&clean_json)
                 .context(format!("Failed to parse analysis JSON: {}", clean_json))?;
 
-            // Update Character Map
             let mut chapter_local_chars = HashMap::new();
             let mut updated_global_map = false;
 
             for char in analysis.characters {
-                // Logic:
-                // If mobs enabled: all processed as usual (persisted).
-                // If mobs disabled:
-                //    - Named/Important/Protagonist -> Global Map
-                //    - Unimportant/Mob-like -> Local Map (do not save to global json)
-
                 let should_persist = if enable_mobs {
                     true
                 } else {
                     char.important || char.is_protagonist || char.voice_id.is_some()
                 };
-
-                // Override: placeholders are never "persisted" in the sense of adding new keys, but updating existing keys.
-                // But if user disables mobs, we don't want to create "路人A" in global map.
 
                 if should_persist {
                     let entry = self.character_map.characters.entry(char.name.clone());
@@ -345,7 +337,6 @@ impl WorkflowManager {
                         }
                     }
                 } else {
-                    // Local map
                     chapter_local_chars.insert(
                         char.name.clone(),
                         CharacterInfo {
@@ -358,19 +349,16 @@ impl WorkflowManager {
                 }
             }
             if updated_global_map {
-                self.save_character_map()?;
+                self.save_character_map().await?;
             }
 
-            // Create combined map for this chapter
             let mut combined_map = self.character_map.clone();
             for (k, v) in chapter_local_chars {
                 combined_map.characters.insert(k, v);
             }
 
-            // 2. Script Generation
             println!("Generating Script...");
 
-            // Gather voice styles
             let mut voice_styles = HashMap::new();
             for info in combined_map.characters.values() {
                 if let Some(vid) = &info.voice_id {
@@ -379,7 +367,6 @@ impl WorkflowManager {
                     }
                 }
             }
-            // For GPT-SoVITS, populate styles for ALL available voices (candidates) so ScriptGenerator can use them
             if self.config.audio.provider == "gpt_sovits" {
                 for v in &voices {
                     if !voice_styles.contains_key(&v.short_name) {
@@ -401,29 +388,13 @@ impl WorkflowManager {
             let script_json = self.llm.chat(&system_instruction, &prompt).await?;
             let segments = self.script_generator.parse_response(&script_json)?;
 
-            // Save Script to cache
-            fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
+            self.storage.write(segments_path_str, serde_json::to_string_pretty(&segments)?.as_bytes()).await?;
 
             segments
         };
 
-        // Re-construct combined map in case we loaded from cache (segments exist)
-        // But wait, if segments exist, we didn't populate local map from LLM.
-        // We might be missing local characters info if we resume!
-        // This is a known issue with this architecture if local state isn't persisted.
-        // However, if segments exist, we iterate segments.
-        // If segments have `voice_id` (new feature), we are good.
-        // If segments rely on speaker name map... we might fail if local char isn't in map.
-        // For now, let's assume if cache exists, we rely on segment.voice_id or global map.
-        // If local chars were used and not saved... reconstruction is hard without saving local map.
-        // But user said "disposable mobs". Maybe it's fine.
-        // Or we should save `chapter_character_map.json` in build dir?
-        // Let's rely on `voice_id` being in segment for those mobs.
-
-        // 3. Synthesize
         println!("Synthesizing audio ({} segments)...", segments.len());
 
-        // Build Excluded Voices (Narrator + Protagonists)
         let mut excluded_voices = Vec::new();
         let narrator_voice_id = self.tts.get_narrator_voice_id();
 
@@ -439,19 +410,9 @@ impl WorkflowManager {
             }
         }
 
-        // We need a map for resolving speakers.
-        // Since we didn't save local map, if we just loaded segments, we only have global map.
-        // If segment has voice_id, we use it.
-        // If segment uses a local mob name but no voice_id... we have a problem if we didn't regenerate.
-        // But `GptSovitsScriptGenerator` is instructed to output `voice_id`.
-
-        // Let's create a working map, defaulting to global.
-        // Note: Chapter Mobs (placeholders) are in global map if enable_mobs=true.
         let mut working_map = self.character_map.clone();
-
         let enable_mobs = self.tts.is_mob_enabled();
 
-        // Resolve Standard Chapter Mobs (if enabled)
         if enable_mobs {
             if let Ok(vid) = self
                 .tts
@@ -474,8 +435,6 @@ impl WorkflowManager {
             }
         }
 
-        // Validate and Fix Segments (Autofix) before synthesis
-        // We pass a mutable reference to segments. If it changes, we should save it.
         let mut segments_mut = segments.clone();
         self.tts
             .check_and_fix_segments(
@@ -486,17 +445,12 @@ impl WorkflowManager {
             )
             .await?;
 
-        // If changed, save back to disk
-        // Note: check_and_fix_segments might populate voice_id for mobs, which is good to persist.
-        // It might also fix emotions.
-        // We do a simple check if any changed, or just overwrite.
-        // Since clone is cheap for this size, let's just overwrite if check_and_fix passes.
-        // (If it fails, it panics/errors out, so we don't save broken stuff, though typically it panics on validation failure)
-        // Wait, if check_and_fix_segments modifies segments_mut (e.g. populating voice_ids), we want to use that for synthesis.
         segments = segments_mut;
-        fs::write(&segments_path, serde_json::to_string_pretty(&segments)?)?;
+        self.storage.write(segments_path_str, serde_json::to_string_pretty(&segments)?.as_bytes()).await?;
 
+        #[cfg(not(target_arch = "wasm32"))]
         let pb = ProgressBar::new(segments.len() as u64);
+        #[cfg(not(target_arch = "wasm32"))]
         pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")?
             .progress_chars("#>-"));
@@ -504,34 +458,41 @@ impl WorkflowManager {
         let tts = &self.tts;
         let working_map_ref = &working_map;
         let excluded_voices_ref = &excluded_voices;
+        let storage = &self.storage;
 
         let max_concurrency = tts.max_concurrency();
-        let results: Vec<Result<(usize, PathBuf)>> = futures_util::stream::iter(segments.iter().enumerate())
+        let results: Vec<Result<(usize, String)>> = futures_util::stream::iter(segments.iter().enumerate())
             .map(|(i, segment)| {
                 let chunk_path = chapter_build_dir.join(format!("chunk_{:04}.mp3", i));
+                let chunk_path_str = chunk_path.to_str().unwrap().to_string();
+                #[cfg(not(target_arch = "wasm32"))]
                 let pb = pb.clone();
+                let storage = storage.clone();
                 async move {
-                    if !chunk_path.exists() {
+                    if !storage.exists(&chunk_path_str).await? {
                         let audio_data = tts.synthesize(segment, working_map_ref, excluded_voices_ref).await?;
-                        tokio_fs::write(&chunk_path, audio_data).await?;
+                        storage.write(&chunk_path_str, &audio_data).await?;
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
                     pb.inc(1);
-                    Ok((i, chunk_path))
+                    Ok((i, chunk_path_str))
                 }
             })
             .buffer_unordered(max_concurrency)
             .collect()
             .await;
 
+        #[cfg(not(target_arch = "wasm32"))]
         pb.finish_with_message("Synthesis complete");
+        #[cfg(target_arch = "wasm32")]
+        println!("Synthesis complete");
 
-        let mut audio_files = vec![PathBuf::new(); segments.len()];
+        let mut audio_files = vec![String::new(); segments.len()];
         for res in results {
             let (i, path) = res?;
             audio_files[i] = path;
         }
 
-        // 4. Merge
         println!("Merging audio...");
         let output_filename = Path::new(filename)
             .with_extension("mp3")
@@ -540,9 +501,17 @@ impl WorkflowManager {
             .to_string_lossy()
             .to_string();
         let final_audio_path = Path::new(&self.config.output_folder).join(output_filename);
+        let final_audio_path_str = final_audio_path.to_str().unwrap();
 
         self.tts
-            .merge_audio_files(&audio_files, &final_audio_path)?;
+            .merge_audio_files(&audio_files, final_audio_path_str, self.storage.as_ref())
+            .await?;
+        
+        // Cleanup logic
+        println!("Cleaning up temporary chunks...");
+        for chunk in audio_files {
+             self.storage.delete(&chunk).await?;
+        }
 
         println!("Chapter complete: {:?}", final_audio_path);
         Ok(())
@@ -556,6 +525,7 @@ mod tests {
     use async_trait::async_trait;
     use std::fs;
     use std::sync::{Arc, Mutex};
+    use crate::core::io::NativeStorage;
 
     #[test]
     fn test_strip_code_blocks() {
@@ -679,9 +649,12 @@ mod tests {
 
         let mock_tts = Box::new(MockTtsClient { should_fail: true });
 
-        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
+        // Use NativeStorage for tests
+        let storage = Arc::new(NativeStorage::new());
 
-        let result = workflow.process_chapter(&chapter_path, filename).await;
+        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts, storage).await?;
+
+        let result = workflow.process_chapter(chapter_path.to_str().unwrap(), filename).await;
 
         assert!(
             result.is_err(),
@@ -754,9 +727,10 @@ mod tests {
 
         let mock_llm = Box::new(MockLlmClient::new());
         let mock_tts = Box::new(MockTtsClient { should_fail: false });
+        let storage = Arc::new(NativeStorage::new());
 
-        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
-        workflow.process_chapter(&chapter_path, filename).await?;
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts, storage).await?;
+        workflow.process_chapter(chapter_path.to_str().unwrap(), filename).await?;
 
         // Check output
         let output_file = output_dir.join("chapter_flat.mp3");
@@ -770,6 +744,14 @@ mod tests {
             !sub_dir.exists(),
             "Subdirectory should NOT exist in output folder"
         );
+
+        let build_chapter_dir = build_dir.join("chapter_flat_txt");
+        assert!(build_chapter_dir.exists(), "Build dir should exist");
+        assert!(build_chapter_dir.join("segments.json").exists(), "Segments json should exist");
+        
+        // Chunk should not exist
+        let chunk_file = build_chapter_dir.join("chunk_0000.mp3");
+        assert!(!chunk_file.exists(), "Chunk should be deleted");
 
         Ok(())
     }
@@ -830,10 +812,11 @@ mod tests {
         let call_count = mock_llm.call_count.clone();
 
         let mock_tts = Box::new(MockTtsClient { should_fail: false });
+        let storage = Arc::new(NativeStorage::new());
 
-        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts)?;
+        let mut workflow = WorkflowManager::new(config.clone(), mock_llm, mock_tts, storage).await?;
 
-        let result = workflow.process_chapter(&chapter_path, filename).await;
+        let result = workflow.process_chapter(chapter_path.to_str().unwrap(), filename).await;
 
         assert!(result.is_ok(), "Should complete successfully");
 
@@ -930,9 +913,6 @@ mod tests {
                 true
             }
             fn format_voice_list_for_analysis(&self, voices: &[crate::services::tts::Voice]) -> String {
-                // Return specific format to verify test expectations if needed, or just a mock
-                // The test checks if specific voice names are in the prompt.
-                // The `format_voice_list_for_analysis` should return string containing voice names.
                 voices
                     .iter()
                     .map(|v| v.short_name.clone())
@@ -968,9 +948,10 @@ mod tests {
             },
         ];
         let mock_tts = Box::new(MockTts { voices });
+        let storage = Arc::new(NativeStorage::new());
 
-        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
-        let _ = workflow.process_chapter(&chapter_path, filename).await;
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts, storage).await?;
+        let _ = workflow.process_chapter(chapter_path.to_str().unwrap(), filename).await;
 
         let prompts = prompts_store.lock().unwrap();
         let analysis_prompt = &prompts[0];
@@ -1107,10 +1088,11 @@ mod tests {
             exclusions: exclusions.clone(),
         });
         let mock_llm = Box::new(ProtagLlm);
+        let storage = Arc::new(NativeStorage::new());
 
-        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts)?;
+        let mut workflow = WorkflowManager::new(config, mock_llm, mock_tts, storage).await?;
         workflow
-            .process_chapter(&input_dir.join(filename), filename)
+            .process_chapter(input_dir.join(filename).to_str().unwrap(), filename)
             .await?;
 
         let ex = exclusions.lock().unwrap();

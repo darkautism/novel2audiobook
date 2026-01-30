@@ -3,6 +3,7 @@ use crate::services::script::{AudioSegment, ScriptGenerator};
 use crate::services::tts::qwen3_api::client::qwen3_tts_infer;
 use crate::services::tts::qwen3_api::server::Qwen3Server;
 use crate::services::tts::{TtsClient, Voice};
+use crate::core::io::Storage;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use hf_hub::api::tokio::Api;
@@ -300,12 +301,30 @@ impl TtsClient for Qwen3TtsClient {
         ))
     }
 
-    fn merge_audio_files(
+    async fn merge_audio_files(
         &self,
-        inputs: &[std::path::PathBuf],
-        output: &std::path::Path,
+        inputs: &[String],
+        output: &str,
+        storage: &dyn Storage,
     ) -> Result<()> {
-        crate::utils::audio::merge_wav_files(inputs, output)
+        let mut buffers = Vec::new();
+        for input in inputs {
+            let data = storage.read(input).await?;
+            buffers.push(std::io::Cursor::new(data));
+        }
+
+        let mut output_buffer = Vec::new();
+        {
+            let mut cursor_output = std::io::Cursor::new(&mut output_buffer);
+            let mut readers: Vec<&mut dyn crate::utils::audio::ReadSeek> = buffers.iter_mut()
+                .map(|c| c as &mut dyn crate::utils::audio::ReadSeek)
+                .collect();
+            
+            crate::utils::audio::merge_wav_files(&mut readers, &mut cursor_output)?;
+        }
+        
+        storage.write(output, &output_buffer).await?;
+        Ok(())
     }
 
     fn max_concurrency(&self) -> usize {

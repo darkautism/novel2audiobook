@@ -1,6 +1,8 @@
 use anyhow::Result;
 use novel2audiobook::core::config::Config;
+use novel2audiobook::core::io::{NativeStorage, Storage};
 use novel2audiobook::services::{llm, setup, tts, workflow::WorkflowManager};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,8 +29,15 @@ async fn main() -> Result<()> {
     // 4. Initialize TTS
     let tts = tts::create_tts_client(&config, Some(llm.as_ref())).await?;
 
-    // 5. Initialize and Run Workflow
-    let mut manager = WorkflowManager::new(config.clone(), llm, tts)?;
+    // 5. Initialize Storage
+    #[cfg(not(target_arch = "wasm32"))]
+    let storage = Arc::new(NativeStorage::new());
+    
+    // For WASM, main is not used, but if it were, we'd need WebStorage.
+    // Since main.rs is native binary entry point, NativeStorage is correct.
+
+    // 6. Initialize and Run Workflow
+    let mut manager = WorkflowManager::new(config.clone(), llm, tts, storage).await?;
     manager.run().await?;
 
     Ok(())

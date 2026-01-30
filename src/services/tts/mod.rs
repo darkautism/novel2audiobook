@@ -2,10 +2,13 @@ use crate::core::config::Config;
 use crate::services::script::{AudioSegment, ScriptGenerator};
 use crate::core::state::CharacterMap;
 use crate::services::llm::LlmClient;
+use crate::core::io::Storage;
+use crate::utils::audio::ReadSeek;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::info;
 use serde::Deserialize;
+use std::io::Cursor;
 
 // --- Constants ---
 
@@ -59,12 +62,32 @@ pub trait TtsClient: Send + Sync {
     fn format_voice_list_for_analysis(&self, voices: &[Voice]) -> String;
     fn get_script_generator(&self) -> Box<dyn ScriptGenerator>;
 
-    fn merge_audio_files(
+    async fn merge_audio_files(
         &self,
-        inputs: &[std::path::PathBuf],
-        output: &std::path::Path,
+        inputs: &[String],
+        output: &str,
+        storage: &dyn Storage,
     ) -> Result<()> {
-        crate::utils::audio::merge_binary_files(inputs, output)
+        // Default implementation using Storage (Binary merge for MP3)
+        let mut buffers = Vec::new();
+        for input in inputs {
+            let data = storage.read(input).await?;
+            buffers.push(Cursor::new(data));
+        }
+
+        let mut output_buffer = Vec::new();
+        // Scope for mutable borrow of output_buffer
+        {
+            let mut cursor_output = Cursor::new(&mut output_buffer);
+            let mut readers: Vec<&mut dyn ReadSeek> = buffers.iter_mut()
+                .map(|c| c as &mut dyn ReadSeek)
+                .collect();
+            
+            crate::utils::audio::merge_binary_files(&mut readers, &mut cursor_output)?;
+        }
+        
+        storage.write(output, &output_buffer).await?;
+        Ok(())
     }
 
     fn max_concurrency(&self) -> usize {

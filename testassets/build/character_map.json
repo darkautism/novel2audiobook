@@ -1,0 +1,28 @@
+{
+  "characters": {
+    "韓孺子": {
+      "gender": "Male",
+      "voice_id": "星穹铁道_开拓者(男)",
+      "description": "年輕的賞金獵人，雖然受命前來奪取數據，但內心對於自己的導師楊奉仍存有一絲敬意與猶疑。",
+      "is_protagonist": true
+    },
+    "楊奉": {
+      "gender": "Male",
+      "voice_id": "星穹铁道_瓦尔特",
+      "description": "老練的組織叛逃者，手中掌握著足以翻轉社會秩序的核心數據，性格堅定且深不可測。",
+      "is_protagonist": true
+    },
+    "左吉": {
+      "gender": "Male",
+      "voice_id": "星穹铁道_罗刹",
+      "description": "直屬於最高權力機構的情報人員，外表優雅知性，實際上手腕狠辣，試圖在混亂中坐收漁利。",
+      "is_protagonist": false
+    },
+    "旁白": {
+      "gender": "Male",
+      "voice_id": "星穹铁道_丹恒",
+      "description": "負責描述場景、動作與氛圍的敘述者。",
+      "is_protagonist": false
+    }
+  }
+}

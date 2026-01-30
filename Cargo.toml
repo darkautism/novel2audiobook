@@ -4,27 +4,39 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.36", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
 serde_json = "1.0"
-reqwest = { version = "0.13.1", features = ["json", "native-tls", "multipart", "stream"] }
-inquire = "0.9.2"
 anyhow = "1.0"
 log = "0.4"
-env_logger = "0.11"
 async-trait = "0.1.89"
-edge-tts = { git = "https://github.com/BlacK201/edge-tts" }
 rand = "0.9.2"
 url = "2.5.8"
 epub = "2.1.5"
 html2text = "0.16.6"
 futures-util = "0.3.31"
+zhconv = "0.4.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.36", features = ["full"] }
+reqwest = { version = "0.13.1", features = ["json", "native-tls", "multipart", "stream"] }
+inquire = "0.9.2"
+env_logger = "0.11"
+edge-tts = { git = "https://github.com/BlacK201/edge-tts" }
 tar = "0.4.44"
 indicatif = "0.18.3"
 flate2 = "1.1.8"
 hf-hub = { git = "https://github.com/darkautism/hf-hub", branch = "main" }
-zhconv = "0.4.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+leptos = { version = "0.6", features = ["csr"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["StorageManager", "Navigator", "Window", "IdbDatabase", "IdbFactory", "IdbOpenDbRequest", "IdbTransaction", "IdbObjectStore", "IdbRequest", "DomException", "console"] }
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+console_log = "1.0"
+idb = "0.6"
+reqwest = { version = "0.13.1", default-features = false, features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3.24.0"

@@ -8,6 +8,7 @@ use crate::services::tts::{
     TtsClient, Voice, VOICE_ID_CHAPTER_MOB_FEMALE, VOICE_ID_CHAPTER_MOB_MALE, VOICE_ID_MOB_FEMALE,
     VOICE_ID_MOB_MALE, VOICE_ID_MOB_NEUTRAL,
 };
+use crate::core::io::Storage;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::seq::IndexedRandom;
@@ -452,11 +453,29 @@ impl TtsClient for GptSovitsClient {
         Box::new(GptSovitsScriptGenerator::new(self.get_narrator_voice_id()))
     }
 
-    fn merge_audio_files(
+    async fn merge_audio_files(
         &self,
-        inputs: &[std::path::PathBuf],
-        output: &std::path::Path,
+        inputs: &[String],
+        output: &str,
+        storage: &dyn Storage,
     ) -> Result<()> {
-        crate::utils::audio::merge_wav_files(inputs, output)
+        let mut buffers = Vec::new();
+        for input in inputs {
+            let data = storage.read(input).await?;
+            buffers.push(std::io::Cursor::new(data));
+        }
+
+        let mut output_buffer = Vec::new();
+        {
+            let mut cursor_output = std::io::Cursor::new(&mut output_buffer);
+            let mut readers: Vec<&mut dyn crate::utils::audio::ReadSeek> = buffers.iter_mut()
+                .map(|c| c as &mut dyn crate::utils::audio::ReadSeek)
+                .collect();
+            
+            crate::utils::audio::merge_wav_files(&mut readers, &mut cursor_output)?;
+        }
+        
+        storage.write(output, &output_buffer).await?;
+        Ok(())
     }
 }

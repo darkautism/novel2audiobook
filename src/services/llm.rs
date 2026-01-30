@@ -43,8 +43,19 @@ fn default_retry_delay() -> u64 {
     10
 }
 
-#[async_trait]
-pub trait LlmClient: Send + Sync + Debug {
+#[cfg(target_arch = "wasm32")]
+pub trait LlmBounds: Debug {}
+#[cfg(target_arch = "wasm32")]
+impl<T: Debug> LlmBounds for T {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait LlmBounds: Send + Sync + Debug {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync + Debug> LlmBounds for T {}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait LlmClient: LlmBounds {
     async fn chat(&self, system: &str, user: &str) -> Result<String>;
 }
 
@@ -92,7 +103,8 @@ struct RetryLlmClient {
     retry_delay_seconds: u64,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl LlmClient for RetryLlmClient {
     async fn chat(&self, system: &str, user: &str) -> Result<String> {
         let mut attempt = 0;
@@ -110,8 +122,21 @@ impl LlmClient for RetryLlmClient {
                     }
 
                     println!("wait {} sec retry", self.retry_delay_seconds);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(self.retry_delay_seconds))
-                        .await;
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    tokio::time::sleep(tokio::time::Duration::from_secs(self.retry_delay_seconds)).await;
+
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let millis = (self.retry_delay_seconds * 1000) as i32;
+                        let promise = js_sys::Promise::new(&mut |resolve, _| {
+                            web_sys::window().unwrap()
+                                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, millis)
+                                .unwrap();
+                        });
+                        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                    }
+
                     attempt += 1;
                 }
             }
@@ -189,7 +214,8 @@ struct GeminiError {
     message: String,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl LlmClient for GeminiClient {
     async fn chat(&self, system: &str, user: &str) -> Result<String> {
         let url = format!(
@@ -307,7 +333,8 @@ struct OllamaMessageResponse {
     content: String,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl LlmClient for OllamaClient {
     async fn chat(&self, system: &str, user: &str) -> Result<String> {
         let url = format!("{}/api/chat", self.base_url);
@@ -400,7 +427,8 @@ struct OpenAIMessageResponse {
     content: Option<String>,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl LlmClient for OpenAIClient {
     async fn chat(&self, system: &str, user: &str) -> Result<String> {
         let url = format!("{}/chat/completions", self.base_url);
@@ -464,7 +492,8 @@ mod tests {
         fatal: bool,
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl LlmClient for MockFailingClient {
         async fn chat(&self, _system: &str, _user: &str) -> Result<String> {
             let mut count = self.failures.lock().unwrap();
@@ -537,10 +566,9 @@ mod tests {
         assert_eq!(*failures.lock().unwrap(), 4);
     }
 
+    // ... existing tests ...
     #[test]
     fn test_gemini_response_parsing_safety_block() {
-        // Simulating a response where content is blocked (safety)
-        // Usually content is missing or parts missing.
         let json = r#"{
             "candidates": [
                 {
@@ -559,7 +587,6 @@ mod tests {
 
     #[test]
     fn test_gemini_response_parsing_empty_content() {
-        // Simulating a response where parts might be missing
         let json = r#"{
             "candidates": [
                 {
@@ -573,7 +600,6 @@ mod tests {
         let result: GeminiResponse = serde_json::from_str(json).unwrap();
         let candidate = &result.candidates.as_ref().unwrap()[0];
 
-        // Content exists but parts are empty (default)
         assert!(candidate.content.is_some());
         assert!(candidate.content.as_ref().unwrap().parts.is_empty());
     }

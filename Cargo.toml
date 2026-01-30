@@ -29,14 +29,16 @@ flate2 = "1.1.8"
 hf-hub = { git = "https://github.com/darkautism/hf-hub", branch = "main" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
 leptos = { version = "0.6", features = ["csr"] }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["StorageManager", "Navigator", "Window", "IdbDatabase", "IdbFactory", "IdbOpenDbRequest", "IdbTransaction", "IdbObjectStore", "IdbRequest", "DomException", "console"] }
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 idb = "0.6"
-reqwest = { version = "0.13.1", default-features = false, features = ["json"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["json", "multipart", "stream"] }
 
 [dev-dependencies]
 tempfile = "3.24.0"

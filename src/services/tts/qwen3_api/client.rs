@@ -3,27 +3,40 @@ use reqwest::{multipart, Client};
 use serde_json::{json, Value};
 use anyhow::{Result, Context, anyhow};
 use log::{debug, warn};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{sleep, Duration};
+#[cfg(target_arch = "wasm32")]
+use std::time::Duration;
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep(duration: Duration) {
+    use wasm_bindgen::prelude::*;
+    let millis = duration.as_millis() as i32;
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        web_sys::window().unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, millis)
+            .unwrap();
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+}
 
 /// Qwen3 TTS 推論函式
 /// 
 /// * `base_url`: Gradio 伺服器位址 (例如 "http://127.0.0.1:8000")
-/// * `voice_file_path`: 本地 .pt 權重檔案路徑
+/// * `voice_data`: 本地 .pt 權重檔案內容
 /// * `text`: 想要合成的文字
 /// * `language`: 語言設定 (例如 "Chinese")
 pub async fn qwen3_tts_infer(
     base_url: &str,
-    voice_file_path: &str,
+    voice_data: &[u8],
     text: &str,
     language: &str,
 ) -> Result<Vec<u8>> {
     let client = Client::new();
 
     // --- 第一步：上傳檔案 ---
-    // 這一步只做一次，因為檔案上傳後路徑應該是穩定的 (或至少短期有效)
-    debug!("正在讀取並上傳檔案: {}", voice_file_path);
-    let file_content = tokio::fs::read(voice_file_path).await.context("Failed to read voice file")?;
-    let part = multipart::Part::bytes(file_content)
+    debug!("正在上傳語音檔案 ({} bytes)", voice_data.len());
+    let part = multipart::Part::bytes(voice_data.to_vec())
         .file_name("model.pt")
         .mime_str("application/octet-stream")
         .context("Invalid mime type")?;

@@ -1863,6 +1863,7 @@ dependencies = [
  "epub",
  "flate2",
  "futures-util",
+ "getrandom 0.3.4",
  "hf-hub",
  "html2text",
  "idb",
@@ -1881,6 +1882,7 @@ dependencies = [
  "tokio",
  "url",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "zhconv",
 ]

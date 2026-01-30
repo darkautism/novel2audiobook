@@ -1,9 +1,15 @@
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use novel2audiobook::core::config::Config;
+#[cfg(not(target_arch = "wasm32"))]
 use novel2audiobook::core::io::{NativeStorage, Storage};
+#[cfg(not(target_arch = "wasm32"))]
 use novel2audiobook::services::{llm, setup, tts, workflow::WorkflowManager};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -23,18 +29,14 @@ async fn main() -> Result<()> {
     // 2. Initialize LLM
     let llm = llm::create_llm(&config.llm)?;
 
-    // 3. Interactive Setup (Voice Selection)
-    setup::run_setup(&mut config, Some(llm.as_ref())).await?;
-
-    // 4. Initialize TTS
-    let tts = tts::create_tts_client(&config, Some(llm.as_ref())).await?;
-
-    // 5. Initialize Storage
-    #[cfg(not(target_arch = "wasm32"))]
+    // 3. Initialize Storage
     let storage = Arc::new(NativeStorage::new());
-    
-    // For WASM, main is not used, but if it were, we'd need WebStorage.
-    // Since main.rs is native binary entry point, NativeStorage is correct.
+
+    // 4. Interactive Setup (Voice Selection)
+    setup::run_setup(&mut config, Some(llm.as_ref()), storage.clone()).await?;
+
+    // 5. Initialize TTS
+    let tts = tts::create_tts_client(&config, Some(llm.as_ref()), storage.clone()).await?;
 
     // 6. Initialize and Run Workflow
     let mut manager = WorkflowManager::new(config.clone(), llm, tts, storage).await?;
@@ -42,3 +44,6 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}

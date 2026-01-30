@@ -1,17 +1,19 @@
 use crate::core::state::CharacterMap;
 use crate::services::script::{AudioSegment, ScriptGenerator};
 use crate::services::tts::qwen3_api::client::qwen3_tts_infer;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::services::tts::qwen3_api::server::Qwen3Server;
 use crate::services::tts::{TtsClient, Voice};
 use crate::core::io::Storage;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
 use hf_hub::api::tokio::Api;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use tokio::fs;
+use std::sync::Arc;
 use zhconv::{zhconv, Variant};
 
 // --- Config ---
@@ -66,16 +68,19 @@ pub struct Qwen3TtsClient {
     config: Qwen3TtsConfig,
     language: String,
     #[allow(dead_code)]
+    #[cfg(not(target_arch = "wasm32"))]
     server: Option<Qwen3Server>,
     metadata: Metadata,
     voice_list: Vec<Voice>,
+    storage: Arc<dyn Storage>,
 }
 
 impl Qwen3TtsClient {
-    pub async fn new(config: Qwen3TtsConfig, language: String) -> Result<Self> {
+    pub async fn new(config: Qwen3TtsConfig, language: String, storage: Arc<dyn Storage>) -> Result<Self> {
         info!("Initializing Qwen3 TTS Client...");
         
-        // 1. Start Server if self_host
+        // 1. Start Server if self_host (Native only)
+        #[cfg(not(target_arch = "wasm32"))]
         let server = if config.self_host {
             let s = Qwen3Server::new(config.clone());
             s.start().await?;
@@ -84,24 +89,20 @@ impl Qwen3TtsClient {
             None
         };
 
-        // 2. Prepare voices directory
-        let voices_dir = Path::new("qwen3_tts_voices");
-        if !voices_dir.exists() {
-            fs::create_dir_all(voices_dir).await?;
-        }
+        // 2. Check/Download voices
+        // We use "qwen3_tts_voices" as a virtual folder in storage
+        download_voices_if_needed(storage.as_ref()).await?;
 
-        // 3. Check/Download voices
-        download_voices_if_needed(voices_dir).await?;
-
-        // 4. Load metadata
-        let metadata_path = voices_dir.join("metadata.json");
-        let metadata_content = fs::read_to_string(&metadata_path)
+        // 3. Load metadata
+        let metadata_path = "qwen3_tts_voices/metadata.json";
+        let metadata_bytes = storage.read(metadata_path)
             .await
-            .context("Failed to read metadata.json")?;
+            .context("Failed to read metadata.json from storage")?;
+        let metadata_content = String::from_utf8(metadata_bytes).context("Invalid UTF-8 in metadata.json")?;
         let metadata: Metadata =
             serde_json::from_str(&metadata_content).context("Failed to parse metadata.json")?;
 
-        // 5. Build Voice List
+        // 4. Build Voice List
         let mut voice_list = Vec::new();
         for (lang, voices) in &metadata {
             if lang == &language {
@@ -120,40 +121,66 @@ impl Qwen3TtsClient {
         Ok(Self {
             config,
             language,
+            #[cfg(not(target_arch = "wasm32"))]
             server,
             metadata,
             voice_list,
+            storage,
         })
     }
 }
 
-async fn download_voices_if_needed(target_dir: &Path) -> Result<()> {
-    info!("Checking voice files from HuggingFace via hf-hub...");
-    let api = Api::new()?;
-    let repo = api.model("kautism/qwen3_tts_voices".to_string());
-    let info = repo.info().await?;
+async fn download_voices_if_needed(storage: &dyn Storage) -> Result<()> {
+    info!("Checking voice files...");
+    let target_dir = "qwen3_tts_voices";
 
-    for file in info.siblings {
-        let filename = file.rfilename;
-        let target_path = target_dir.join(&filename);
+    // Ensure "directory" exists (Storage assumes paths, but mostly for native)
+    // WebStorage doesn't care.
 
-        if !target_path.exists() {
-            info!("Downloading {}...", filename);
-            let path = repo.get(&filename).await?;
-            
-            if let Some(parent) = target_path.parent() {
-                if !parent.exists() {
-                    fs::create_dir_all(parent).await?;
-                }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        info!("Downloading voices from HuggingFace via hf-hub...");
+        let api = Api::new()?;
+        let repo = api.model("kautism/qwen3_tts_voices".to_string());
+        let info = repo.info().await?;
+
+        for file in info.siblings {
+            let filename = file.rfilename;
+            let target_path = format!("{}/{}", target_dir, filename);
+
+            if !storage.exists(&target_path).await? {
+                info!("Downloading {}...", filename);
+                let path = repo.get(&filename).await?;
+                let content = tokio::fs::read(path).await?;
+                storage.write(&target_path, &content).await?;
             }
-            fs::copy(path, target_path).await?;
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // On WASM, we only fetch metadata.json initially to save bandwidth.
+        // Other files are fetched on demand in synthesize.
+        let filename = "metadata.json";
+        let target_path = format!("{}/{}", target_dir, filename);
+
+        if !storage.exists(&target_path).await? {
+            info!("Downloading metadata.json...");
+            let url = format!("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main/{}", filename);
+            let resp = reqwest::get(&url).await?;
+            if !resp.status().is_success() {
+                return Err(anyhow!("Failed to download metadata.json: {}", resp.status()));
+            }
+            let data = resp.bytes().await?.to_vec();
+            storage.write(&target_path, &data).await?;
         }
     }
 
     Ok(())
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TtsClient for Qwen3TtsClient {
     async fn list_voices(&self) -> Result<Vec<Voice>> {
         Ok(self.voice_list.clone())
@@ -205,11 +232,28 @@ impl TtsClient for Qwen3TtsClient {
         };
 
         let filename = format!("{}-{}-{}.pt", lang, voice_id, final_style);
-        let file_path = Path::new("qwen3_tts_voices").join(&filename);
+        let file_path = format!("qwen3_tts_voices/{}", filename);
 
-        if !file_path.exists() {
-            return Err(anyhow!("Voice file not found: {:?}", file_path));
-        }
+        let voice_data = if self.storage.exists(&file_path).await? {
+             self.storage.read(&file_path).await?
+        } else {
+             #[cfg(target_arch = "wasm32")]
+             {
+                 info!("Downloading voice file: {}...", filename);
+                 let url = format!("https://huggingface.co/kautism/qwen3_tts_voices/resolve/main/{}", filename);
+                 let resp = reqwest::get(&url).await?;
+                 if !resp.status().is_success() {
+                     return Err(anyhow!("Failed to download voice file {}: {}", filename, resp.status()));
+                 }
+                 let data = resp.bytes().await?.to_vec();
+                 self.storage.write(&file_path, &data).await?;
+                 data
+             }
+             #[cfg(not(target_arch = "wasm32"))]
+             {
+                 return Err(anyhow!("Voice file not found: {}. Please ensure all voices are downloaded.", file_path));
+             }
+        };
 
         let infer_lang = match lang.as_str() {
             "zh" => "Chinese",
@@ -225,7 +269,7 @@ impl TtsClient for Qwen3TtsClient {
 
         qwen3_tts_infer(
             base_url,
-            file_path.to_str().unwrap(),
+            &voice_data,
             text,
             infer_lang,
         )

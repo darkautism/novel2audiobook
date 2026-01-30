@@ -10,9 +10,13 @@ use crate::core::io::Storage;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use futures_util::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+#[cfg(target_arch = "wasm32")]
+use std::path::Path;
 use std::sync::Arc;
 
 pub struct WorkflowManager {

@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use log::info;
 use serde::Deserialize;
 use std::io::Cursor;
+use std::sync::Arc;
 
 // --- Constants ---
 
@@ -28,8 +29,19 @@ pub struct Voice {
     pub friendly_name: Option<String>,
 }
 
-#[async_trait]
-pub trait TtsClient: Send + Sync {
+#[cfg(target_arch = "wasm32")]
+pub trait TtsBounds {}
+#[cfg(target_arch = "wasm32")]
+impl<T> TtsBounds for T {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait TtsBounds: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync> TtsBounds for T {}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait TtsClient: TtsBounds {
     async fn list_voices(&self) -> Result<Vec<Voice>>;
     async fn synthesize(
         &self,
@@ -98,9 +110,12 @@ pub trait TtsClient: Send + Sync {
 pub async fn fetch_voice_list(
     config: &Config,
     llm: Option<&dyn LlmClient>,
+    storage: Arc<dyn Storage>,
 ) -> Result<Vec<Voice>> {
     match config.audio.provider.as_str() {
+        #[cfg(not(target_arch = "wasm32"))]
         "edge-tts" => edge::list_voices().await,
+        #[cfg(not(target_arch = "wasm32"))]
         "gpt_sovits" => {
             let gpt_config = config
                 .audio
@@ -117,11 +132,11 @@ pub async fn fetch_voice_list(
                 .clone()
                 .ok_or_else(|| anyhow!("Qwen3 TTS config missing"))?;
             let language = config.audio.language.clone();
-            let client = qwen3_tts::Qwen3TtsClient::new(qwen_config, language).await?;
+            let client = qwen3_tts::Qwen3TtsClient::new(qwen_config, language, storage).await?;
             client.list_voices().await
         }
         _ => Err(anyhow::anyhow!(
-            "Unknown TTS provider: {}",
+            "Unknown TTS provider (or not supported on this platform): {}",
             config.audio.provider
         )),
     }
@@ -130,9 +145,11 @@ pub async fn fetch_voice_list(
 pub async fn create_tts_client(
     config: &Config,
     llm: Option<&dyn LlmClient>,
+    storage: Arc<dyn Storage>,
 ) -> Result<Box<dyn TtsClient>> {
     info!("Initializing TTS Client for provider: {}", config.audio.provider);
     match config.audio.provider.as_str() {
+        #[cfg(not(target_arch = "wasm32"))]
         "edge-tts" => {
             let edge_config = config.audio.edge_tts.clone().unwrap_or_default();
             let exclude_locales = config.audio.exclude_locales.clone();
@@ -141,6 +158,7 @@ pub async fn create_tts_client(
                 edge::EdgeTtsClient::new(edge_config, exclude_locales, language).await?,
             ))
         }
+        #[cfg(not(target_arch = "wasm32"))]
         "gpt_sovits" => {
             let gpt_config = config
                 .audio
@@ -160,16 +178,19 @@ pub async fn create_tts_client(
                 .ok_or_else(|| anyhow!("Qwen3 TTS config missing"))?;
             let language = config.audio.language.clone();
             Ok(Box::new(
-                qwen3_tts::Qwen3TtsClient::new(qwen_config, language).await?,
+                qwen3_tts::Qwen3TtsClient::new(qwen_config, language, storage).await?,
             ))
         }
         _ => Err(anyhow!("Unknown TTS provider: {}", config.audio.provider)),
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod edge;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpt_sovits;
 pub mod qwen3_tts;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpt_sovits_config;
 pub mod qwen3_api;
 

@@ -1,10 +1,14 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::services::llm::LlmConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::services::tts::edge::EdgeTtsConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::services::tts::gpt_sovits_config::GptSovitsConfig;
 use crate::services::tts::qwen3_tts::Qwen3TtsConfig;
 
@@ -38,9 +42,13 @@ pub struct AudioConfig {
     #[serde(default = "default_exclude_locales")]
     pub exclude_locales: Vec<String>,
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[serde(rename = "edge-tts")]
     pub edge_tts: Option<EdgeTtsConfig>,
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub gpt_sovits: Option<GptSovitsConfig>,
+
     pub qwen3_tts: Option<Qwen3TtsConfig>,
 }
 
@@ -63,6 +71,7 @@ fn default_tts_provider() -> String {
     "edge-tts".to_string()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Config {
     pub fn load() -> Result<Self> {
         let path = Path::new("config.yml");

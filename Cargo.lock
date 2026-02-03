@@ -837,7 +837,7 @@ checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 [[package]]
 name = "hf-hub"
 version = "0.4.3"
-source = "git+https://github.com/darkautism/hf-hub?branch=main#41277ce142f3d0bd928cb273f042c13f6d9617b0"
+source = "git+https://github.com/darkautism/hf-hub?branch=main#8a24e1a28aa5cf5a4e5d2e2ec7627f0e5df3d361"
 dependencies = [
  "dirs",
  "futures",
@@ -853,6 +853,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "unicode-width",
  "ureq",
  "windows-sys 0.61.2",
 ]

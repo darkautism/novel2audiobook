@@ -22,7 +22,7 @@ html2text = "0.16.6"
 futures-util = "0.3.31"
 tar = "0.4.44"
 indicatif = "0.18.3"
-flate2 = "1.1.8"
+flate2 = "1.1.9"
 hf-hub = { git = "https://github.com/darkautism/hf-hub", branch = "main" }
 zhconv = "0.4.0"
 
